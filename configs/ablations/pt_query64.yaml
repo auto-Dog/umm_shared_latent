@@ -1,0 +1,10 @@
+extends: ../baseline_pt.yaml
+
+model:
+  connector:
+    num_queries: 64
+
+training:
+  output_dir: outputs/ablation_pt-query64
+  run_name: ablation-pt-query64
+

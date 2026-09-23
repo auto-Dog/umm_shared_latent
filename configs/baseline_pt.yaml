@@ -1,0 +1,74 @@
+stage: pt
+seed: 42
+
+model:
+  mllm_id: Qwen/Qwen2.5-VL-3B-Instruct
+  sana_id: Efficient-Large-Model/Sana_600M_512px_diffusers
+  vae_id: mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
+  torch_dtype: bfloat16
+  attention_backend: sdpa
+  gradient_checkpointing: true
+  generation_system_prompt: You will be given an image or its caption. Please describe the content of the image in detail in your own words.
+  min_pixels: 200704
+  max_pixels: 1000000
+  connector:
+    type: light_transformer
+    num_queries: 256
+    hidden_size: 896
+    intermediate_size: 4096
+    num_hidden_layers: 6
+    num_attention_heads: 14
+    dropout: 0.0
+  losses:
+    flow_weight: 1.0
+    latent_alignment_weight: 0.0
+    query_diversity_weight: 0.0
+  trainable_parameter_guard_m: [70, 140]
+  init_checkpoint: null
+
+data:
+  streaming: true
+  image_size: 512
+  max_input_text_tokens: 256
+  # A 10k streaming shuffle downloads roughly 10k remote examples before yielding
+  # the first batch. 500 preserves bounded shuffling without the apparent startup hang.
+  shuffle_buffer: 500
+  system_prompt: You will be given an image or its caption. Please describe the content of the image in detail in your own words.
+  sources:
+    - kind: cc12m
+      path: pixparse/cc12m-wds
+      split: train
+      sample_count: 600000
+      seed_offset: 0
+    - kind: omniedit
+      path: TIGER-Lab/OmniEdit-Filtered-1.2M
+      split: train
+      sample_count: 600000
+      seed_offset: 1
+
+training:
+  output_dir: outputs/baseline_pt
+  run_name: uniquery-baseline-pt
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0001
+  weight_decay: 0.1
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  max_grad_norm: 1.0
+  max_steps: null
+  bf16: true
+  tf32: true
+  logging_steps: 10
+  save_steps: 500
+  save_total_limit: 2
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  optim: adamw_torch_fused
+  report_to: wandb
+  deepspeed: configs/deepspeed_zero1.json
+  failure_recovery:
+    enabled: true
+    auto_resume: true
+    max_restarts: 5
+    monitor_interval_seconds: 5

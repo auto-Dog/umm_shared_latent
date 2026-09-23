@@ -1,0 +1,10 @@
+extends: ../baseline_dm.yaml
+
+model:
+  losses:
+    latent_alignment_weight: 0.1
+
+training:
+  output_dir: outputs/ablation_dm_alignment
+  run_name: ablation-dm-alignment
+

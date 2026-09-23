@@ -1,0 +1,11 @@
+extends: ../baseline_pt.yaml
+
+model:
+  connector:
+    type: linear
+  trainable_parameter_guard_m: [1, 10]
+
+training:
+  output_dir: outputs/ablation_pt_linear_connector
+  run_name: ablation-pt-linear-connector
+

@@ -1,0 +1,10 @@
+extends: ../baseline_pt.yaml
+
+model:
+  losses:
+    latent_alignment_weight: 0.1
+
+training:
+  output_dir: outputs/ablation_pt_alignment
+  run_name: ablation-pt-alignment
+

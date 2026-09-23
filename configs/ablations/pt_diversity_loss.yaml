@@ -1,0 +1,10 @@
+extends: ../baseline_pt.yaml
+
+model:
+  losses:
+    query_diversity_weight: 0.01
+
+training:
+  output_dir: outputs/ablation_pt_diversity
+  run_name: ablation-pt-diversity
+

@@ -1,0 +1,22 @@
+extends: baseline_pt.yaml
+
+stage: dm
+
+model:
+  init_checkpoint: null
+
+data:
+  sources:
+    - kind: metaquery_instruct
+      path: xcpan/MetaQuery_Instruct_2.4M_512res
+      split: train
+      sample_count: 200000
+      seed_offset: 2
+
+training:
+  output_dir: outputs/baseline_dm
+  run_name: uniquery-baseline-dm
+  learning_rate: 0.00005
+  warmup_ratio: 0.02
+  save_steps: 250
+

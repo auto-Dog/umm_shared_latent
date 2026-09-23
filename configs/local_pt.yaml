@@ -1,0 +1,15 @@
+# Runtime profile for the GPU host used during bring-up. The model paths point
+# at already-downloaded weights; data remains streamed from the Hub/mirror.
+extends: baseline_pt.yaml
+
+model:
+  mllm_id: /data/mingjun/qwen25_vl
+  sana_id: /data/mingjun/sana
+  vae_id: /data/mingjun/sana/vae
+
+data:
+  shuffle_buffer: 500
+
+training:
+  output_dir: outputs/pt_local
+  run_name: uniquery-pt-local

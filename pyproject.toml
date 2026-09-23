@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "umm-uniquery"
+version = "0.1.0"
+description = "A streaming MetaQuery-style Qwen2.5-VL + Sana baseline for unified multimodal generation."
+requires-python = ">=3.11"
+dependencies = [
+  "accelerate>=1.2",
+  "datasets>=2.21,<4",
+  "diffusers>=0.32,<1",
+  "numpy>=1.26,<3",
+  "Pillow>=10",
+  "PyYAML>=6",
+  "safetensors>=0.4",
+  "torch>=2.4",
+  "transformers==4.49.0",
+]
+
+[project.optional-dependencies]
+tracking = ["wandb>=0.18"]
+
+[project.scripts]
+umm-uniquery-train = "umm_uniquery.train:main"
+umm-uniquery-launch = "umm_uniquery.resilient_launch:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
