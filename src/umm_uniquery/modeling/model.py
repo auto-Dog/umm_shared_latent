@@ -133,8 +133,12 @@ class UniQueryModel(nn.Module):
         )
 
         self.mllm.requires_grad_(False)
-        self.transformer.requires_grad_(False)
         self.vae.requires_grad_(False)
+        # Reference MetaQuery fine-tunes the Sana generation backbone; the baseline
+        # froze it to hold the ~0.1B trainable budget. train_flow_model opts back
+        # into the MetaQuery behavior (Qwen and the VAE stay frozen either way).
+        self.train_flow_model = bool(config.get("train_flow_model", False))
+        self.transformer.requires_grad_(self.train_flow_model)
         # This is the original MetaQuery learnable-query mechanism. The resized
         # embedding parameter participates in autograd, while the hook zeros every
         # pre-existing Qwen row so only BOI/EOI/<img_i> rows learn.
@@ -526,6 +530,15 @@ class UniQueryModel(nn.Module):
             for name, tensor in self.state_dict().items()
             if name.startswith(prefixes)
         }
+        if self.train_flow_model:
+            # Fine-tuned flow weights must survive checkpoints; without this a
+            # trainable Sana would silently reset every save/restart.
+            state.update(
+                {
+                    name: tensor.detach().cpu().contiguous()
+                    for name, tensor in self.transformer.state_dict().items()
+                }
+            )
         state["metaquery_embeddings"] = (
             self.mllm.get_input_embeddings()
             .weight[self.metaquery_token_start : self.metaquery_token_end + 1]

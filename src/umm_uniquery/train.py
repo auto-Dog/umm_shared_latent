@@ -131,12 +131,14 @@ def main() -> None:
             print("[recovery] No complete checkpoint found; restarting from the beginning")
 
     trainable_millions = model.trainable_parameter_count / 1_000_000
-    lower, upper = config["model"].get("trainable_parameter_guard_m", [70, 140])
-    if not (float(lower) <= trainable_millions <= float(upper)):
-        raise ValueError(
-            f"Trainable parameter count {trainable_millions:.2f}M is outside guard "
-            f"[{lower}, {upper}]M; check the freeze policy and connector config."
-        )
+    guard = config["model"].get("trainable_parameter_guard_m")
+    if guard is not None:
+        lower, upper = guard
+        if not (float(lower) <= trainable_millions <= float(upper)):
+            raise ValueError(
+                f"Trainable parameter count {trainable_millions:.2f}M is outside guard "
+                f"[{lower}, {upper}]M; check the freeze policy and connector config."
+            )
 
     trainer = UniQueryTrainer(
         model=model,

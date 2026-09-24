@@ -27,9 +27,11 @@ class UniQueryTrainer(Trainer):
         outputs = model(**inputs)
         loss = outputs["loss"]
         self._component_count += 1
+        # Accumulate every output component (including "loss" itself) so log()
+        # can report the true per-micro-batch mean. HF Trainer's built-in "loss"
+        # divides by optimizer steps, which inflates it by gradient_accumulation_steps.
         for name, value in outputs.items():
-            if name != "loss" and name.endswith("_loss"):
-                self._component_sums[name] = self._component_sums.get(name, 0.0) + float(value)
+            self._component_sums[name] = self._component_sums.get(name, 0.0) + float(value)
         return (loss, outputs) if return_outputs else loss
 
     def log(self, logs: dict[str, float], start_time: float | None = None) -> None:

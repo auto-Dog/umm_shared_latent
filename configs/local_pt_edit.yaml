@@ -1,0 +1,30 @@
+# Stage 2: edit instruction (+reference image) -> edited image on OmniEdit only,
+# initialized from the stage-1 CC12M adapter. Runs only after local_pt_cc12m.yaml
+# completes; point model.init_checkpoint at the stage-1 output dir.
+extends: local_pt.yaml
+
+model:
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  init_checkpoint: outputs/pt_cc12m
+
+data:
+  sources:
+    - kind: omniedit
+      path: TIGER-Lab/OmniEdit-Filtered-1.2M
+      split: train
+      sample_count: 60000
+      seed_offset: 1
+
+training:
+  output_dir: outputs/pt_edit
+  run_name: uniquery-pt-edit
+  report_to: none
+  logging_steps: 10
+  save_steps: 100
+  save_total_limit: 2
+  # Edit-stage LR is typically lower than stage 1; 5e-5 keeps parity for now.
+  learning_rate: 5e-5
+  gradient_accumulation_steps: 32
+  warmup_ratio: 0.1
+  deepspeed: null
