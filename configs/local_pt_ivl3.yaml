@@ -11,7 +11,11 @@ model:
   sana_id: /data/mingjun/sana
   vae_id: /data/mingjun/sana/vae
   attention_backend: flash_attention_2  # falls back to eager if flash_attn is absent
-  gradient_checkpointing: false          # nothing trainable behind checkpointing here
+  # The MetaQuery embedding rows ARE trainable inside the frozen LLM, so autograd
+  # retains every LLM layer's activations (~8GB at batch 8). Gradient checkpointing
+  # recomputes them on backward instead — without it the 24GB cards OOM when shared
+  # with other jobs. (The "nothing trainable behind checkpointing" comment was wrong.)
+  gradient_checkpointing: true
   train_flow_model: false
   trainable_parameter_guard_m: null
 

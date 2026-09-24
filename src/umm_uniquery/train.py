@@ -16,6 +16,7 @@ from umm_uniquery.training.stages import StageComponents  # noqa: F401 - registe
 from umm_uniquery.training.trainer import UniQueryTrainer
 from umm_uniquery.training.recovery import (
     CheckpointCompletionCallback,
+    StopAtStepCallback,
     find_latest_resumable_checkpoint,
     is_resumable_checkpoint,
 )
@@ -75,7 +76,9 @@ def _training_arguments(config: dict, total_samples: int) -> TrainingArguments:
         accelerator_config={"dispatch_batches": False, "split_batches": False},
         remove_unused_columns=False,
         ddp_find_unused_parameters=False,
-        ignore_data_skip=False,
+        # Staged runs set ignore_data_skip=True: each stage pins fresh data_files, so
+        # the resume-time stream-position skip must not consume the new stage's data.
+        ignore_data_skip=bool(train.get("ignore_data_skip", False)),
         seed=int(config.get("seed", 42)),
         data_seed=int(config.get("seed", 42)),
         optim=train.get("optim", "adamw_torch_fused"),
@@ -143,6 +146,21 @@ def main() -> None:
         _print_data_sample(model, components)
     training_args = _training_arguments(config, components.dataset.total_samples)
 
+    # Staged training: max_steps spans the full run (one LR schedule) while each
+    # stage's data is bounded by sample_count. Stop at the stage quota so the
+    # exhausted IterableDataset is not re-consumed; the checkpoint saved here is
+    # what the next stage resumes from. The target is anchored at the stage's
+    # starting global step (runner-managed), so an elastic restart mid-stage
+    # resumes toward the same target instead of extending it.
+    effective_batch = training_args.per_device_train_batch_size * max(
+        1, int(training_args.gradient_accumulation_steps)
+    ) * max(1, int(os.environ.get("WORLD_SIZE", "1")))
+    derived_steps = math.ceil(components.dataset.total_samples / effective_batch)
+    stage_start_step = int(config["training"].get("stage_start_step", 0))
+    callbacks = [CheckpointCompletionCallback()]
+    if training_args.max_steps > derived_steps or stage_start_step > 0:
+        callbacks.append(StopAtStepCallback(stage_start_step + derived_steps))
+
     resume_checkpoint = args.resume_from_checkpoint
     recovery = config["training"].get("failure_recovery", {})
     elastic_restart_count = int(os.environ.get("TORCHELASTIC_RESTART_COUNT", "0"))
@@ -182,7 +200,7 @@ def main() -> None:
         args=training_args,
         train_dataset=components.dataset,
         data_collator=components.collator,
-        callbacks=[CheckpointCompletionCallback()],
+        callbacks=callbacks,
     )
     trainer.train(resume_from_checkpoint=resume_checkpoint)
     trainer.save_model(training_args.output_dir)

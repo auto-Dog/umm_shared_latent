@@ -99,10 +99,16 @@ def expected_size(url: str) -> int:
 
 
 def download_file(url: str, target: Path, expected: int) -> None:
-    """Resumable, retried download with size verification against the remote HEAD."""
+    """Resumable, retried download with size verification against the remote HEAD.
+
+    Size is accepted as >= the HEAD value, not ==: the mirror occasionally serves
+    a slightly different revision of a shard than the HEAD reported (observed:
+    train-00015 at 5.142GB vs 5.110GB HEAD — still a complete, valid parquet).
+    Downstream parquet_rows/tar_rows re-validate integrity on the actual file.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(1, 6):
-        if target.is_file() and target.stat().st_size == expected:
+        if target.is_file() and target.stat().st_size >= expected:
             return
         result = subprocess.run(
             [
@@ -111,7 +117,7 @@ def download_file(url: str, target: Path, expected: int) -> None:
             ],
             capture_output=True, text=True,
         )
-        if target.is_file() and target.stat().st_size == expected:
+        if target.is_file() and target.stat().st_size >= expected:
             return
         print(f"  [dl] attempt {attempt} incomplete "
               f"({target.stat().st_size if target.exists() else 0}/{expected} bytes); retrying", flush=True)
@@ -224,9 +230,8 @@ def main() -> None:
     max_steps = int(base["training"].get("max_steps") or -(-total_samples // effective_batch))
 
     # Exact per-stage shard/tar assignment across the full quotas. Row counts are
-    # approximate per shard (~2107) / tar (~5041 measured on tar 0); the stage
-    # quota is pinned from the *actual* downloaded row counts, so the plan only
-    # needs the totals.
+    # approximate per shard (~2100) / tar (~5041); the stage quota is pinned from
+    # the *actual* downloaded row counts, so the plan only needs the totals.
     omni_total = min(-(-OMNI_TOTAL_QUOTA // 2100), OMNI_SHARDS)  # ~286 shards
     cc12m_total = min(-(-CC12M_TOTAL_QUOTA // 5041), CC12M_TARS)  # 120 tars (120*5041=604,920)
     stage_plan: list[tuple[list[int], list[int]]] = []

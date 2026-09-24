@@ -60,6 +60,27 @@ def find_latest_resumable_checkpoint(output_dir: str | Path) -> str | None:
     return None
 
 
+class StopAtStepCallback(TrainerCallback):
+    """Stops staged training at a fixed global step, saving a resumable checkpoint.
+
+    Staged runs keep one global LR schedule (max_steps = the full-run total) while
+    each stage pins only its own local data_files. The mixture's sample_count bounds
+    the stage's data, but the Trainer would otherwise re-consume the exhausted
+    IterableDataset indefinitely (no __len__, num_train_epochs=sys.maxsize). This
+    callback fires at the stage quota's last step, saves the checkpoint in that same
+    step (should_save), then flags should_training_stop for a clean exit.
+    """
+
+    def __init__(self, target_steps: int):
+        self.target_steps = int(target_steps)
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step >= self.target_steps:
+            control.should_save = True
+            control.should_training_stop = True
+        return control
+
+
 class CheckpointCompletionCallback(TrainerCallback):
     """Writes a completion marker only after Trainer saved every checkpoint component."""
 

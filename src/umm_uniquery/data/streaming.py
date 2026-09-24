@@ -61,6 +61,11 @@ def standardize_omniedit(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Staged runs pin OmniEdit parquet shards downloaded to local disk; the parquet
+# loader reads them with zero network and yields the same columns as the hub rows.
+DATA_SOURCES.register("omniedit_local")(standardize_omniedit)
+
+
 @DATA_SOURCES.register("metaquery_instruct")
 def standardize_metaquery(row: dict[str, Any]) -> dict[str, Any]:
     raw_sources = row.get("source_images", row.get("input_images", [])) or []
@@ -94,6 +99,15 @@ class ExactStreamingMixture(IterableDataset):
             # are read straight from the archive (see data/sources/cc12m_wds in configs).
             stream = load_dataset(
                 "webdataset",
+                data_files=source["path"],
+                split=source.get("split", "train"),
+                streaming=True,
+            )
+        elif source["kind"] == "omniedit_local":
+            # Stage-pinned local parquet shards: same columns as the hub rows, read
+            # with zero network (see scripts/run_staged_pt.py for the staging loop).
+            stream = load_dataset(
+                "parquet",
                 data_files=source["path"],
                 split=source.get("split", "train"),
                 streaming=True,
