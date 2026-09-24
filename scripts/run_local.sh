@@ -2,7 +2,11 @@
 set -euo pipefail
 
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
+export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
+# Large streaming shards (multi-GB parquet) fail on short read timeouts; 900s covers
+# an entire ~6GB shard at ~7MB/s. Override with HF_HUB_DOWNLOAD_TIMEOUT if needed.
+export HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-900}"
+export HF_HUB_ETAG_TIMEOUT="${HF_HUB_ETAG_TIMEOUT:-30}"
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 

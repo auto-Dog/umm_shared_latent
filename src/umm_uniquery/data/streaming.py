@@ -47,6 +47,10 @@ def standardize_cc12m(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Local WebDataset tar entries carry the same jpg/txt keys as the HF parquet rows.
+DATA_SOURCES.register("cc12m_wds")(standardize_cc12m)
+
+
 @DATA_SOURCES.register("omniedit")
 def standardize_omniedit(row: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -85,16 +89,26 @@ class ExactStreamingMixture(IterableDataset):
         self.total_samples = sum(int(source["sample_count"]) for source in sources)
 
     def _source_iterator(self, source: dict[str, Any], worker_id: int) -> Iterator[dict[str, Any]]:
-        kwargs: dict[str, Any] = {
-            "path": source["path"],
-            "split": source.get("split", "train"),
-            "streaming": True,
-        }
-        if source.get("name"):
-            kwargs["name"] = source["name"]
-        if source.get("data_files"):
-            kwargs["data_files"] = source["data_files"]
-        stream = load_dataset(**kwargs)
+        if source["kind"] == "cc12m_wds":
+            # Local WebDataset tar files are true streaming: no shard download, entries
+            # are read straight from the archive (see data/sources/cc12m_wds in configs).
+            stream = load_dataset(
+                "webdataset",
+                data_files=source["path"],
+                split=source.get("split", "train"),
+                streaming=True,
+            )
+        else:
+            kwargs: dict[str, Any] = {
+                "path": source["path"],
+                "split": source.get("split", "train"),
+                "streaming": True,
+            }
+            if source.get("name"):
+                kwargs["name"] = source["name"]
+            if source.get("data_files"):
+                kwargs["data_files"] = source["data_files"]
+            stream = load_dataset(**kwargs)
         stream = stream.shuffle(
             seed=self.seed + int(source.get("seed_offset", 0)),
             buffer_size=self.shuffle_buffer,

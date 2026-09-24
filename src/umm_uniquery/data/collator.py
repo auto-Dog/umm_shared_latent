@@ -75,3 +75,59 @@ class UniQueryCollator:
         # Keep Trainer batches tensor-only. Accelerate's batch broadcast rejects
         # string lists, and task metadata is not consumed by the baseline loss.
         return batch
+
+
+class InternVL3Collator:
+    """Text-only collator for the InternVL3-1B MetaQuery backbone.
+
+    Builds the InternVL3 chat prompt (system block, user turn, open assistant turn)
+    plus the MetaQuery query_suffix and tokenizes with the plain HF tokenizer; the
+    InternVL ViT is not part of the text-to-image query path. Encoding is text-only,
+    so batches are already tensor-only and Accelerate-broadcast friendly.
+    """
+
+    def __init__(
+        self,
+        tokenizer: Any,
+        image_size: int,
+        query_suffix: str,
+        system_prompt: str = (
+            "You are a text-to-image generation model. Generate the image described "
+            "by the user prompt. The image query tokens in the sequence represent "
+            "the image to generate."
+        ),
+        max_input_text_tokens: int = 256,
+    ):
+        self.tokenizer = tokenizer
+        self.image_size = image_size
+        self.system_prompt = system_prompt
+        self.query_suffix = query_suffix
+        self.max_input_text_tokens = max_input_text_tokens
+
+    def _truncate_text(self, text: str) -> str:
+        token_ids = self.tokenizer(
+            text=text, return_tensors="pt", add_special_tokens=False
+        ).input_ids[0, : self.max_input_text_tokens]
+        return self.tokenizer.decode(token_ids)
+
+    def _prompt(self, example: dict[str, Any]) -> str:
+        user = self._truncate_text(example["prompt"])
+        return (
+            "<|im_start|>system\n"
+            f"{self.system_prompt}"
+            "<|im_end|>\n<|im_start|>user\n"
+            f"{user}"
+            "<|im_end|>\n<|im_start|>assistant\n"
+            + self.query_suffix
+        )
+
+    def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Any]:
+        prompts = [self._prompt(example) for example in examples]
+        encoded = self.tokenizer(
+            text=prompts, return_tensors="pt", padding=True, add_special_tokens=True
+        )
+        batch = dict(encoded)
+        batch["target_pixels"] = torch.stack(
+            [_center_crop_resize(example["target_image"], self.image_size) for example in examples]
+        )
+        return batch

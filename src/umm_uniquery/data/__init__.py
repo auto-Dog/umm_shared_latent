@@ -1,5 +1,5 @@
-from .collator import UniQueryCollator
+from .collator import InternVL3Collator, UniQueryCollator
 from .streaming import ExactStreamingMixture
 
-__all__ = ["ExactStreamingMixture", "UniQueryCollator"]
+__all__ = ["ExactStreamingMixture", "UniQueryCollator", "InternVL3Collator"]
 

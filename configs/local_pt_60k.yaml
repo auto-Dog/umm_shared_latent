@@ -18,7 +18,7 @@ data:
 training:
   output_dir: outputs/pt_60k
   run_name: uniquery-pt-60k
-  report_to: none
+  report_to: tensorboard
   logging_steps: 10
   save_steps: 100
   save_total_limit: 2

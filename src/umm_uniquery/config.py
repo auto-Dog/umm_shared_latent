@@ -70,17 +70,27 @@ def validate_config(config: dict[str, Any]) -> None:
     for source in sources:
         if int(source.get("sample_count", 0)) <= 0:
             raise ValueError(f"source.sample_count must be positive: {source}")
-    connector = config["model"].get("connector", {})
-    max_pixels = int(config["model"].get("max_pixels", 1_000_000))
-    if max_pixels > 1_000_000:
-        raise ValueError(
-            "model.max_pixels must not exceed 1,000,000 for the Qwen2.5-VL backbone"
-        )
-    if max_pixels <= 0:
-        raise ValueError("model.max_pixels must be positive")
-    min_pixels = int(config["model"].get("min_pixels", 0))
-    if min_pixels <= 0 or min_pixels > max_pixels:
-        raise ValueError("model.min_pixels must be positive and no greater than model.max_pixels")
+    model_cfg = config["model"]
+    backbone = model_cfg.get("backbone", "qwen")
+    if backbone == "internvl3":
+        if not model_cfg.get("ivl3_id"):
+            raise ValueError("model.ivl3_id is required for the internvl3 backbone")
+        if not model_cfg.get("sana_id"):
+            raise ValueError("model.sana_id is required for the internvl3 backbone")
+    else:
+        max_pixels = int(model_cfg.get("max_pixels", 1_000_000))
+        if max_pixels > 1_000_000:
+            raise ValueError(
+                "model.max_pixels must not exceed 1,000,000 for the Qwen2.5-VL backbone"
+            )
+        if max_pixels <= 0:
+            raise ValueError("model.max_pixels must be positive")
+        min_pixels = int(model_cfg.get("min_pixels", 0))
+        if min_pixels <= 0 or min_pixels > max_pixels:
+            raise ValueError(
+                "model.min_pixels must be positive and no greater than model.max_pixels"
+            )
+    connector = model_cfg.get("connector", {})
     if connector.get("type") == "light_transformer":
         hidden = int(connector["hidden_size"])
         heads = int(connector["num_attention_heads"])

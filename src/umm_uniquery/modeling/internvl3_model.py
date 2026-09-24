@@ -6,8 +6,8 @@ from typing import Any
 
 import torch
 from diffusers import (
-    AutoencoderKL,
     AutoencoderDC,
+    AutoencoderKL,
     DPMSolverMultistepScheduler,
     FlowMatchEulerDiscreteScheduler,
     SanaPipeline,
@@ -16,15 +16,36 @@ from diffusers import (
 from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from safetensors.torch import load_file, save_file
 from torch import nn
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+from transformers import AutoTokenizer
 
 from .connector import build_connector
-from .internvl3_model import _SanaStubTokenizer
+from .internvl3.modeling_internvl_chat import InternVLChatModel
+from .internvl3.modeling_intern_vit import has_flash_attn
 from .losses import LatentAlignmentHead, query_diversity_loss
 
+# Prompt preamble matching InternVL3's chat template (see the tokenizer's
+# chat_template.jinja): optional system block, then the user turn and an open
+# assistant turn. The MetaQuery query_suffix is appended after this.
+_INTERNVL3_SYSTEM = "<|im_start|>system\n{system}<|im_end|>\n"
+_INTERNVL3_USER = "<|im_start|>user\n{input}<|im_end|>\n<|im_start|>assistant\n"
 
-class UniQueryModel(nn.Module):
-    """Frozen Qwen2.5-VL and Sana joined by learnable queries and a light connector."""
+
+class _SanaStubTokenizer:
+    """Minimal stand-in for SanaPipeline when prompt_embeds bypass text encoding."""
+
+    padding_side = "right"
+
+
+class UniQueryInternVL3Model(nn.Module):
+    """InternVL3-1B backbone with the same special-token MetaQuery as the Qwen model.
+
+    The Qwen variant encodes BOI/EOI/query tokens as new vocabulary rows and slices
+    the frozen LLM hidden states between BOI and EOI. This class reproduces that
+    mechanism on InternVL3's Llama language model so both backbones share identical
+    MetaQuery semantics and adapter checkpoint format. Images (via the InternVL ViT)
+    are not part of the text-to-image query path; like the OpenUni t2i stage, only the
+    LLM text forward is used.
+    """
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
@@ -32,39 +53,35 @@ class UniQueryModel(nn.Module):
         # model.config.to_json_string() and would fail on a plain dict.
         self.model_config = config
         dtype = getattr(torch, config.get("torch_dtype", "bfloat16"))
-        attention_backend = config.get("attention_backend", "sdpa")
+        ivl3_id = config["ivl3_id"]
+        backend = config.get("attention_backend", "sdpa")
+        use_flash_attn = backend == "flash_attention_2" and has_flash_attn
 
-        self.mllm = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            config["mllm_id"],
+        self.ivl3 = InternVLChatModel.from_pretrained(
+            ivl3_id,
             torch_dtype=dtype,
-            attn_implementation=attention_backend,
+            low_cpu_mem_usage=True,
+            use_flash_attn=use_flash_attn,
         )
-        self.processor = AutoProcessor.from_pretrained(
-            config["mllm_id"],
-            min_pixels=config.get("min_pixels", 256 * 28 * 28),
-            max_pixels=min(int(config.get("max_pixels", 1_000_000)), 1_000_000),
-        )
-        self.processor.tokenizer.padding_side = "left"
-        self.image_token_id = int(
-            getattr(
-                self.mllm.config,
-                "image_token_id",
-                self.processor.tokenizer.convert_tokens_to_ids("<|image_pad|>"),
-            )
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            ivl3_id, trust_remote_code=True, padding_side="right"
         )
         self.num_queries = int(config["connector"].get("num_queries", 256))
-        tokenizer = self.processor.tokenizer
-        original_vocab_size = self.mllm.get_input_embeddings().num_embeddings
-        # Keep MetaQuery's exact vocabulary construction order: first reserve model
-        # rows for BOI/EOI/query tokens, then bring the tokenizer up to the model's
-        # original vocabulary size, and finally append the MetaQuery special tokens.
+        tokenizer = self.tokenizer
+        language_model = self.ivl3.language_model
+        original_vocab_size = language_model.get_input_embeddings().num_embeddings
+        # Mirror the Qwen variant's exact MetaQuery vocabulary construction: reserve
+        # model rows for BOI/EOI/query tokens, bring the tokenizer up to the model's
+        # original vocabulary size, then append the MetaQuery special tokens.
         try:
-            self.mllm.resize_token_embeddings(
+            language_model.resize_token_embeddings(
                 original_vocab_size + self.num_queries + 2,
                 mean_resizing=False,
             )
         except TypeError:
-            self.mllm.resize_token_embeddings(original_vocab_size + self.num_queries + 2)
+            language_model.resize_token_embeddings(
+                original_vocab_size + self.num_queries + 2
+            )
         if len(tokenizer) < original_vocab_size:
             tokenizer.add_special_tokens(
                 {
@@ -81,11 +98,11 @@ class UniQueryModel(nn.Module):
         tokenizer.add_special_tokens(
             {"additional_special_tokens": metaquery_tokens}
         )
-        if len(tokenizer) != self.mllm.get_input_embeddings().num_embeddings:
+        if len(tokenizer) != language_model.get_input_embeddings().num_embeddings:
             raise ValueError(
                 "MetaQuery tokenizer/model vocabulary mismatch after adding special tokens: "
                 f"tokenizer={len(tokenizer)}, model="
-                f"{self.mllm.get_input_embeddings().num_embeddings}"
+                f"{language_model.get_input_embeddings().num_embeddings}"
             )
         self.boi_token_id = tokenizer.convert_tokens_to_ids("<begin_of_img>")
         self.eoi_token_id = tokenizer.convert_tokens_to_ids("<end_of_img>")
@@ -107,8 +124,9 @@ class UniQueryModel(nn.Module):
         self.query_suffix = (
             "\n<begin_of_img>"
             + "".join(f"<img{index}>" for index in range(self.num_queries))
-            + "<end_of_img><|im_end|>"
+            + "<end_of_img>"
         )
+
         sana_id = config["sana_id"]
         self.transformer = SanaTransformer2DModel.from_pretrained(
             sana_id, subfolder="transformer", torch_dtype=dtype
@@ -135,34 +153,29 @@ class UniQueryModel(nn.Module):
             sana_id, subfolder="scheduler"
         )
 
-        self.mllm.requires_grad_(False)
+        self.ivl3.requires_grad_(False)
         self.vae.requires_grad_(False)
-        # Reference MetaQuery fine-tunes the Sana generation backbone; the baseline
-        # froze it to hold the ~0.1B trainable budget. train_flow_model opts back
-        # into the MetaQuery behavior (Qwen and the VAE stay frozen either way).
         self.train_flow_model = bool(config.get("train_flow_model", False))
         self.transformer.requires_grad_(self.train_flow_model)
-        # This is the original MetaQuery learnable-query mechanism. The resized
-        # embedding parameter participates in autograd, while the hook zeros every
-        # pre-existing Qwen row so only BOI/EOI/<img_i> rows learn.
-        embedding_weight = self.mllm.get_input_embeddings().weight
+        # Original MetaQuery learnable-query mechanism: the resized embedding parameter
+        # participates in autograd, while the hook zeros every pre-existing InternVL3
+        # row so only BOI/EOI/<img_i> rows learn.
+        embedding_weight = language_model.get_input_embeddings().weight
         embedding_weight.requires_grad_(True)
 
-        def freeze_qwen_embedding_rows(gradient: torch.Tensor) -> torch.Tensor:
+        def freeze_internvl3_embedding_rows(gradient: torch.Tensor) -> torch.Tensor:
             gradient[:original_vocab_size].zero_()
             return gradient
 
-        embedding_weight.register_hook(freeze_qwen_embedding_rows)
-        self.mllm.config.use_cache = False
-        self.mllm.model.config.use_sliding_window = False
-        self.mllm.model.config.sliding_window = None
-        # MetaQuery exposes the final Qwen hidden states through `.logits` and avoids
-        # materializing vocabulary logits during diffusion training.
-        self.mllm.lm_head = nn.Identity()
+        embedding_weight.register_hook(freeze_internvl3_embedding_rows)
+        language_model.config.use_cache = False
 
-        context_size = int(self.mllm.config.hidden_size)
+        context_size = int(self.ivl3.config.llm_config.hidden_size)
         output_size = int(self.transformer.config.caption_channels)
-        self.connector = build_connector(config["connector"], context_size, output_size)
+        # The frozen LLM emits bf16 hidden states; run the connector in the same dtype
+        # (OpenUni's reference trains it under bfloat16 as well) so standalone forward
+        # and generation work without an autocast wrapper.
+        self.connector = build_connector(config["connector"], context_size, output_size).to(dtype)
 
         loss_config = config.get("losses", {})
         self.flow_weight = float(loss_config.get("flow_weight", 1.0))
@@ -172,16 +185,16 @@ class UniQueryModel(nn.Module):
         if self.alignment_weight > 0:
             query_size = int(config["connector"]["hidden_size"])
             latent_channels = int(getattr(self.transformer.config, "in_channels", 32))
-            self.alignment_head = LatentAlignmentHead(query_size, latent_channels)
+            self.alignment_head = LatentAlignmentHead(query_size, latent_channels).to(dtype)
 
         if config.get("gradient_checkpointing", True):
-            self.mllm.gradient_checkpointing_enable({"use_reentrant": False})
+            language_model.gradient_checkpointing_enable({"use_reentrant": False})
             self.transformer.enable_gradient_checkpointing()
 
     def train(self, mode: bool = True):
         super().train(mode)
-        # The frozen VAE needs no backward graph. Qwen/Sana remain in training mode so
-        # their checkpointed activations can pass gradients to Query/Connector inputs.
+        # The frozen VAE needs no backward graph. InternVL3/Sana remain in training
+        # mode so their checkpointed activations can pass gradients to Query/Connector.
         self.vae.eval()
         return self
 
@@ -189,7 +202,7 @@ class UniQueryModel(nn.Module):
     def trainable_parameter_count(self) -> int:
         # Count the effective trainable rows, not the frozen prefix of the single
         # dense embedding Parameter retained for MetaQuery compatibility.
-        embedding_weight = self.mllm.get_input_embeddings().weight
+        embedding_weight = self.ivl3.language_model.get_input_embeddings().weight
         count = (self.num_queries + 2) * embedding_weight.shape[1]
         embedding_id = id(embedding_weight)
         count += sum(
@@ -203,25 +216,17 @@ class UniQueryModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-        qwen_pixel_values: torch.Tensor | list[torch.Tensor] | None = None,
-        qwen_image_grid_thw: torch.Tensor | list[torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        kwargs: dict[str, Any] = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "use_cache": False,
-            "return_dict": True,
-        }
-        qwen_pixel_values, qwen_image_grid_thw = self._prepare_qwen_vision_inputs(
+        # InternVL3's InternVLChatModel.forward unconditionally runs extract_feature on
+        # pixel_values, so the MetaQuery t2i path bypasses it and drives the frozen
+        # Llama directly (matching OpenUni's `self.llm.model(...)` call).
+        output = self.ivl3.language_model.model(
             input_ids=input_ids,
-            pixel_values=qwen_pixel_values,
-            image_grid_thw=qwen_image_grid_thw,
+            attention_mask=attention_mask,
+            use_cache=False,
+            return_dict=True,
         )
-        if qwen_pixel_values is not None:
-            kwargs["pixel_values"] = qwen_pixel_values
-            kwargs["image_grid_thw"] = qwen_image_grid_thw
-        output = self.mllm(**kwargs)
-        hidden_states = output.logits
+        hidden_states = output.last_hidden_state
 
         boi_mask = input_ids == self.boi_token_id
         eoi_mask = input_ids == self.eoi_token_id
@@ -246,92 +251,16 @@ class UniQueryModel(nn.Module):
             input_ids.shape[0], self.num_queries, hidden_states.shape[-1]
         )
 
-    def _prepare_qwen_vision_inputs(
+    def encode_queries(
         self,
         input_ids: torch.Tensor,
-        pixel_values: torch.Tensor | list[torch.Tensor] | None,
-        image_grid_thw: torch.Tensor | list[torch.Tensor] | None,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        if pixel_values is None and image_grid_thw is None:
-            if torch.any(input_ids == self.image_token_id):
-                raise ValueError("Qwen input_ids contain image tokens but pixel_values are missing")
-            return None, None
-        if pixel_values is None or image_grid_thw is None:
-            raise ValueError("Qwen pixel_values and image_grid_thw must be provided together")
-
-        if isinstance(pixel_values, (list, tuple)):
-            if not pixel_values:
-                raise ValueError("Qwen pixel_values list must not be empty")
-            chunks = []
-            for value in pixel_values:
-                if value.ndim == 3 and value.shape[0] == 1:
-                    value = value.squeeze(0)
-                if value.ndim != 2:
-                    raise ValueError(
-                        "Each processed Qwen pixel_values tensor must have shape "
-                        "[num_patches, patch_dim]"
-                    )
-                chunks.append(value)
-            pixel_values = torch.cat(chunks, dim=0)
-        elif pixel_values.ndim == 3 and pixel_values.shape[0] == 1:
-            pixel_values = pixel_values.squeeze(0)
-        if pixel_values.ndim != 2:
-            raise ValueError(
-                "Qwen pixel_values must be processor output with shape "
-                "[num_patches, patch_dim], not raw [batch, channels, height, width] images"
-            )
-
-        if isinstance(image_grid_thw, (list, tuple)):
-            if not image_grid_thw:
-                raise ValueError("Qwen image_grid_thw list must not be empty")
-            image_grid_thw = torch.cat(
-                [value.reshape(-1, 3) for value in image_grid_thw], dim=0
-            )
-        image_grid_thw = image_grid_thw.reshape(-1, 3).to(
-            device=input_ids.device, dtype=torch.long
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        context = self.encode_context(input_ids, attention_mask)
+        query_mask = torch.ones(
+            context.shape[:2], device=context.device, dtype=torch.bool
         )
-        patches_per_image = image_grid_thw.prod(dim=1)
-        expected_patches = int(patches_per_image.sum().item())
-        if pixel_values.shape[0] != expected_patches:
-            raise ValueError(
-                "Qwen pixel/grid mismatch: "
-                f"pixel_values has {pixel_values.shape[0]} patches, "
-                f"but image_grid_thw describes {expected_patches}"
-            )
-
-        patch_size = int(self.mllm.config.vision_config.patch_size)
-        spatial_pixels = image_grid_thw[:, 1] * image_grid_thw[:, 2] * (patch_size**2)
-        if torch.any(spatial_pixels > 1_000_000):
-            raise ValueError(
-                "Qwen image exceeds the 1,000,000 pixel hard limit after processor resize: "
-                f"{spatial_pixels.tolist()}"
-            )
-
-        spatial_merge = int(self.mllm.config.vision_config.spatial_merge_size)
-        merge_area = spatial_merge**2
-        if torch.any(patches_per_image % merge_area != 0):
-            raise ValueError(
-                "Each Qwen image grid must be divisible by spatial_merge_size squared"
-            )
-        expected_image_tokens = int((patches_per_image // merge_area).sum().item())
-        actual_image_tokens = int((input_ids == self.image_token_id).sum().item())
-        if actual_image_tokens != expected_image_tokens:
-            raise ValueError(
-                "Qwen image token/grid mismatch: "
-                f"input_ids has {actual_image_tokens} image tokens, "
-                f"but image_grid_thw requires {expected_image_tokens}"
-            )
-
-        visual = getattr(self.mllm, "visual", None)
-        if visual is None:
-            visual = getattr(self.mllm.model, "visual", None)
-        if visual is None:
-            raise AttributeError(
-                "Qwen2.5-VL visual encoder was not found on the loaded Transformers model"
-            )
-        vision_dtype = next(visual.parameters()).dtype
-        pixel_values = pixel_values.to(device=input_ids.device, dtype=vision_dtype)
-        return pixel_values, image_grid_thw
+        return self.connector(context, query_mask)
 
     @torch.no_grad()
     def pixels_to_latents(self, target_pixels: torch.Tensor) -> torch.Tensor:
@@ -346,24 +275,6 @@ class UniQueryModel(nn.Module):
         if shift is not None:
             latents = latents - shift
         return latents * self.vae.config.scaling_factor
-
-    def encode_queries(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        qwen_pixel_values: torch.Tensor | list[torch.Tensor] | None = None,
-        qwen_image_grid_thw: torch.Tensor | list[torch.Tensor] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        context = self.encode_context(
-            input_ids,
-            attention_mask,
-            qwen_pixel_values,
-            qwen_image_grid_thw,
-        )
-        query_mask = torch.ones(
-            context.shape[:2], device=context.device, dtype=torch.bool
-        )
-        return self.connector(context, query_mask)
 
     def _get_sigmas(self, timesteps: torch.Tensor, latents: torch.Tensor) -> torch.Tensor:
         schedule_timesteps = self.noise_scheduler.timesteps.to(timesteps.device)
@@ -417,28 +328,11 @@ class UniQueryModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         target_pixels: torch.Tensor,
-        qwen_pixel_values: torch.Tensor | list[torch.Tensor] | None = None,
-        qwen_image_grid_thw: torch.Tensor | list[torch.Tensor] | None = None,
-        pixel_values: torch.Tensor | None = None,
-        image_grid_thw: torch.Tensor | None = None,
         **_: Any,
     ) -> dict[str, torch.Tensor]:
-        if qwen_pixel_values is not None and pixel_values is not None:
-            raise ValueError("Pass qwen_pixel_values or legacy pixel_values, not both")
-        if qwen_image_grid_thw is not None and image_grid_thw is not None:
-            raise ValueError("Pass qwen_image_grid_thw or legacy image_grid_thw, not both")
-        qwen_pixel_values = (
-            qwen_pixel_values if qwen_pixel_values is not None else pixel_values
-        )
-        qwen_image_grid_thw = (
-            qwen_image_grid_thw if qwen_image_grid_thw is not None else image_grid_thw
-        )
         latents = self.pixels_to_latents(target_pixels)
         prompt_embeds, query_states = self.encode_queries(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            qwen_pixel_values=qwen_pixel_values,
-            qwen_image_grid_thw=qwen_image_grid_thw,
+            input_ids=input_ids, attention_mask=attention_mask
         )
         query_mask = torch.ones(
             prompt_embeds.shape[:2], device=prompt_embeds.device, dtype=torch.bool
@@ -479,18 +373,15 @@ class UniQueryModel(nn.Module):
         )
 
         def render_prompt(text: str) -> str:
-            conversation = [
-                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                {"role": "user", "content": [{"type": "text", "text": text}]},
-            ]
-            prompt = self.processor.apply_chat_template(
-                conversation, tokenize=False, add_generation_prompt=True
+            return (
+                _INTERNVL3_SYSTEM.format(system=system_prompt)
+                + _INTERNVL3_USER.format(input=text)
+                + self.query_suffix
             )
-            return prompt + self.query_suffix
 
         positive = [render_prompt(prompt) for prompt in prompts]
         negative = [render_prompt(negative_prompt) for _ in prompts]
-        encoded = self.processor(
+        encoded = self.tokenizer(
             text=positive + negative, return_tensors="pt", padding=True
         )
         device = next(self.connector.parameters()).device
@@ -537,8 +428,6 @@ class UniQueryModel(nn.Module):
             if name.startswith(prefixes)
         }
         if self.train_flow_model:
-            # Fine-tuned flow weights must survive checkpoints; without this a
-            # trainable Sana would silently reset every save/restart.
             state.update(
                 {
                     name: tensor.detach().cpu().contiguous()
@@ -546,7 +435,7 @@ class UniQueryModel(nn.Module):
                 }
             )
         state["metaquery_embeddings"] = (
-            self.mllm.get_input_embeddings()
+            self.ivl3.language_model.get_input_embeddings()
             .weight[self.metaquery_token_start : self.metaquery_token_end + 1]
             .detach()
             .cpu()
@@ -564,13 +453,10 @@ class UniQueryModel(nn.Module):
     def load_adapter(self, checkpoint_dir: str | Path, strict: bool = True) -> None:
         state = load_file(str(Path(checkpoint_dir) / "adapter_model.safetensors"))
         metaquery_embeddings = state.pop("metaquery_embeddings", None)
-        # Backward-compatible with the short-lived independent-Parameter format.
-        if metaquery_embeddings is None:
-            metaquery_embeddings = state.pop("query_token_embeddings", None)
         if metaquery_embeddings is not None:
             expected_shape = (
                 self.num_queries + 2,
-                self.mllm.get_input_embeddings().weight.shape[1],
+                self.ivl3.language_model.get_input_embeddings().weight.shape[1],
             )
             if tuple(metaquery_embeddings.shape) != expected_shape:
                 raise RuntimeError(
@@ -578,7 +464,7 @@ class UniQueryModel(nn.Module):
                     f"expected={expected_shape}, got={tuple(metaquery_embeddings.shape)}"
                 )
             with torch.no_grad():
-                self.mllm.get_input_embeddings().weight[
+                self.ivl3.language_model.get_input_embeddings().weight[
                     self.metaquery_token_start : self.metaquery_token_end + 1
                 ].copy_(metaquery_embeddings)
         missing, unexpected = self.load_state_dict(state, strict=False)

@@ -19,7 +19,7 @@ data:
 training:
   output_dir: outputs/pt_edit
   run_name: uniquery-pt-edit
-  report_to: none
+  report_to: tensorboard
   logging_steps: 10
   save_steps: 100
   save_total_limit: 2

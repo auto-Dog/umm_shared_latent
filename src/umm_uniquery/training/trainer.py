@@ -47,7 +47,10 @@ class UniQueryTrainer(Trainer):
         os.makedirs(output_dir, exist_ok=True)
         model = self.accelerator.unwrap_model(self.model)
         model.save_adapter(output_dir)
-        model.processor.save_pretrained(output_dir)
+        # InternVL3 uses a plain tokenizer instead of a multimodal processor.
+        text_encoder = getattr(model, "processor", None) or getattr(model, "tokenizer", None)
+        if text_encoder is not None:
+            text_encoder.save_pretrained(output_dir)
         torch.save(self.args, Path(output_dir) / "training_args.bin")
         with (Path(output_dir) / "trainable_parameters.json").open(
             "w", encoding="utf-8"

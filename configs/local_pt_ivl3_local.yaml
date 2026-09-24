@@ -1,0 +1,40 @@
+# InternVL3-1B backbone, local WebDataset tar data. Mirrors the OpenUni
+# internvl3_1b_sana_0_6b_512_stream_pt profile: frozen 1B LLM + frozen Sana, batch 8,
+# no activation checkpointing, flash attention when available. The data pipeline is
+# true streaming (tar entries, no shard download), so a single 24GB card trains
+# several times faster than the Qwen parquet path.
+extends: local_pt.yaml
+
+model:
+  backbone: internvl3
+  ivl3_id: /home/mingjun/OpenUni/OpenUni_MME/models/InternVL3-1B
+  sana_id: /data/mingjun/sana
+  vae_id: /data/mingjun/sana/vae
+  attention_backend: flash_attention_2  # falls back to eager if flash_attn is absent
+  gradient_checkpointing: false          # nothing trainable behind checkpointing here
+  train_flow_model: false
+  trainable_parameter_guard_m: null
+
+data:
+  image_size: 512
+  shuffle_buffer: 500
+  sources:
+    - kind: cc12m_wds
+      path: /data/mingjun/cc12m_local/*.tar
+      split: train
+      # 4 local tars hold 5041 samples each (20164 total); keep a safe margin under it.
+      sample_count: 16000
+      seed_offset: 0
+
+training:
+  output_dir: outputs/pt_ivl3
+  run_name: uniquery-pt-ivl3
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2
+  learning_rate: 5e-5
+  weight_decay: 0.05
+  warmup_ratio: 0.05
+  deepspeed: null

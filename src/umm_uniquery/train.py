@@ -10,7 +10,7 @@ from transformers import TrainingArguments, set_seed
 
 from umm_uniquery.config import load_config
 from umm_uniquery.hf_mirror import install_hf_mirror_rewrite
-from umm_uniquery.modeling import UniQueryModel
+from umm_uniquery.modeling import UniQueryInternVL3Model, UniQueryModel
 from umm_uniquery.registry import STAGES
 from umm_uniquery.training.stages import StageComponents  # noqa: F401 - registers stages
 from umm_uniquery.training.trainer import UniQueryTrainer
@@ -83,6 +83,38 @@ def _training_arguments(config: dict, total_samples: int) -> TrainingArguments:
     )
 
 
+def _print_data_sample(model: Any, components: StageComponents) -> None:
+    """Print one collated sample exactly as the model will receive it (RANK 0).
+
+    Each ExactStreamingMixture.__iter__() builds fresh, seed-deterministic iterators,
+    so consuming one sample here does not disturb the trainer's own iterator.
+    """
+    example = next(iter(components.dataset))
+    batch = components.collator([example])
+    print("=" * 72)
+    print("[data-sample] task:", example["task"])
+    print("[data-sample] prompt:", example["prompt"])
+    text_encoder = getattr(model, "processor", None) or getattr(model, "tokenizer", None)
+    if text_encoder is not None:
+        decoded = text_encoder.decode(
+            batch["input_ids"][0], skip_special_tokens=False
+        )
+        print("[data-sample] decoded input_ids:", decoded[:2000])
+    for name, value in batch.items():
+        if name == "input_ids":
+            continue
+        print(
+            f"[data-sample] {name}: shape={tuple(value.shape)} dtype={value.dtype}"
+            + (
+                f" range=[{value.min():.3f}, {value.max():.3f}]"
+                if value.dtype.is_floating_point
+                else ""
+            )
+        )
+    print("[data-sample] input_ids: shape=" + str(tuple(batch["input_ids"].shape)))
+    print("=" * 72)
+
+
 def main() -> None:
     install_hf_mirror_rewrite()
     args = parse_args()
@@ -97,13 +129,18 @@ def main() -> None:
         config["training"]["deepspeed"] = str((project_root / deepspeed).resolve())
     set_seed(int(config.get("seed", 42)))
 
-    model = UniQueryModel(config["model"])
+    if config["model"].get("backbone") == "internvl3":
+        model = UniQueryInternVL3Model(config["model"])
+    else:
+        model = UniQueryModel(config["model"])
     init_checkpoint = config["model"].get("init_checkpoint")
     if init_checkpoint:
         model.load_adapter(init_checkpoint, strict=False)
 
     stage_builder = STAGES.get(config["stage"])
     components = stage_builder(config, model)
+    if int(os.environ.get("RANK", "0")) == 0:
+        _print_data_sample(model, components)
     training_args = _training_arguments(config, components.dataset.total_samples)
 
     resume_checkpoint = args.resume_from_checkpoint

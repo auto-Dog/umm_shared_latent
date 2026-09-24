@@ -8,7 +8,7 @@ model:
   torch_dtype: bfloat16
   attention_backend: sdpa
   gradient_checkpointing: true
-  generation_system_prompt: You will be given an image or its caption. Please describe the content of the image in detail in your own words.
+  generation_system_prompt: You are an unified model. Generate the image described by the user prompt and image if available. The image query tokens in the sequence represent the image to generate.
   min_pixels: 200704
   max_pixels: 1000000
   connector:
@@ -33,7 +33,7 @@ data:
   # A 10k streaming shuffle downloads roughly 10k remote examples before yielding
   # the first batch. 500 preserves bounded shuffling without the apparent startup hang.
   shuffle_buffer: 500
-  system_prompt: You will be given an image or its caption. Please describe the content of the image in detail in your own words.
+  system_prompt: You are a text-to-image generation model. Generate the image described by the user prompt. The image query tokens in the sequence represent the image to generate.
   sources:
     - kind: cc12m
       path: pixparse/cc12m-wds
@@ -65,7 +65,7 @@ training:
   dataloader_num_workers: 0
   dataloader_pin_memory: true
   optim: adamw_torch_fused
-  report_to: wandb
+  report_to: tensorboard
   deepspeed: configs/deepspeed_zero1.json
   failure_recovery:
     enabled: true

@@ -17,7 +17,7 @@ data:
 training:
   output_dir: outputs/smoke_pt
   run_name: uniquery-smoke-pt
-  report_to: none
+  report_to: tensorboard
   logging_steps: 5
   save_steps: 10
   save_total_limit: 2
