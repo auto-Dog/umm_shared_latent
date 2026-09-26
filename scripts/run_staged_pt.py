@@ -127,7 +127,16 @@ def download_file(url: str, target: Path, expected: int) -> None:
 
 
 def parquet_rows(path: Path) -> int:
-    return pq.ParquetFile(path).metadata.num_rows
+    """Full-scan a parquet file, returning its row count.
+
+    A metadata-only read cannot see torn pages: a shard that downloaded fine
+    by size but is corrupt mid-file (observed 2026-09-27 on omni_00209, from a
+    disk-full window) still opens for metadata but throws
+    `Deserializing page header failed` on a full read — which then crashed the
+    trainer ~20 min later. Scanning every page here catches that at download
+    time instead.
+    """
+    return pq.read_table(path).num_rows
 
 
 def tar_rows(path: Path) -> int:
@@ -272,6 +281,19 @@ def main() -> None:
             target = stage_dir / f"omni_{shard:05d}.parquet"
             print(f"  [dl] omni shard {shard}/{OMNI_SHARDS - 1} ...", flush=True)
             download_file(url, target, expected_size(url))
+            # Verify the full file (not just the footer); a corrupt download
+            # crashes training ~20 min later, so catch it now and re-fetch.
+            for attempt in range(1, 4):
+                try:
+                    parquet_rows(target)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  [dl] shard {shard} corrupt on verify (attempt {attempt}/3): "
+                          f"{exc.__class__.__name__}; re-downloading", flush=True)
+                    target.unlink(missing_ok=True)
+                    download_file(url, target, expected_size(url))
+                    if attempt == 3:
+                        raise
             omni_files.append(target)
         for tar in cc12m_tars_idx:
             url = cc12m_url(tar)
