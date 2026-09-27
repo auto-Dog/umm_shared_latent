@@ -324,11 +324,20 @@ def main() -> None:
                     self._result = prepare_stage(idx)
                 except BaseException as exc:  # noqa: BLE001 — surfaced on join()
                     self._error = exc
-            threading.Thread(target=_run, daemon=True).start()
+            self._thread = threading.Thread(target=_run, daemon=True)
+            self._thread.start()
             return self
 
         def join(self) -> StageData:
-            assert self._error is not None or self._result is not None
+            # Block until the background download finishes, then surface its
+            # error or result. A plain assert here (old code) crashed the whole
+            # runner if training finished before the prefetch thread: the assert
+            # fires while _error/_result are both still None, the daemon thread
+            # dies with the process, and its curl keeps writing the stage dir —
+            # so a later sync-fallback prepare_stage runs curl against the same
+            # file in parallel, tearing it. Waiting instead guarantees the
+            # download is done before we build/train on its data.
+            self._thread.join()
             if self._error is not None:
                 raise self._error
             return self._result  # type: ignore[return-value]
