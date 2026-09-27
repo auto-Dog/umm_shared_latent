@@ -170,14 +170,19 @@ def build_stage_config(base: dict, out: Path, idx: int, omni_files: list[str],
             "sample_count": quota(omni_rows),
             "seed_offset": idx,
         },
-        {
-            "kind": "cc12m_wds",
-            "path": cc12m_files,
-            "split": "train",
-            "sample_count": quota(cc12m_rows),
-            "seed_offset": idx,
-        },
     ]
+    # Omni-only stages (40-47) carry no CC12M tars; omit the source entirely —
+    # load_dataset rejects an empty data_files list.
+    if cc12m_files:
+        cfg["data"]["sources"].append(
+            {
+                "kind": "cc12m_wds",
+                "path": cc12m_files,
+                "split": "train",
+                "sample_count": quota(cc12m_rows),
+                "seed_offset": idx,
+            }
+        )
     cfg["training"].update(
         {
             "output_dir": str(out),
