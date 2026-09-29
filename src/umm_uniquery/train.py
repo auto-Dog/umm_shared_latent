@@ -179,15 +179,15 @@ class GenerationEvalCallback(TrainerCallback):
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"[eval] generated at global_step={step}: {paths}", flush=True)
 
-    def on_train_begin(self, args, state, control):
+    def on_train_begin(self, args, state, control, **kwargs):
         if self.eval_at_start and int(state.global_step) == 0:
             self._generate(0)
 
-    def on_step_end(self, args, state, control):
+    def on_step_end(self, args, state, control, **kwargs):
         if self.eval_steps and int(state.global_step) % self.eval_steps == 0:
             self._generate(int(state.global_step))
 
-    def on_train_end(self, args, state, control):
+    def on_train_end(self, args, state, control, **kwargs):
         self._generate(int(state.global_step))
 
 
