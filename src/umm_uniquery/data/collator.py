@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import random
 from typing import Any
 
 import numpy as np
 import torch
 from PIL import Image
+
+# OpenUni drops the text condition to this fixed prompt with probability
+# `cfg_dropout` (their `unconditional=0.1`); the CFG template's text is
+# "Generate an image." in prompt_template.
+_CFG_PROMPT = "Generate an image."
 
 
 def _center_crop_resize(image: Image.Image, size: int) -> torch.Tensor:
@@ -27,12 +33,14 @@ class UniQueryCollator:
         system_prompt: str,
         query_suffix: str,
         max_input_text_tokens: int = 256,
+        cfg_dropout: float = 0.0,
     ):
         self.processor = processor
         self.image_size = image_size
         self.system_prompt = system_prompt
         self.query_suffix = query_suffix
         self.max_input_text_tokens = max_input_text_tokens
+        self.cfg_dropout = cfg_dropout
 
     def _truncate_text(self, text: str) -> str:
         tokenizer = self.processor.tokenizer
@@ -42,9 +50,12 @@ class UniQueryCollator:
         return tokenizer.decode(token_ids)
 
     def _prompt(self, example: dict[str, Any]) -> str:
+        text = self._truncate_text(example["prompt"])
+        if self.cfg_dropout > 0 and random.random() < self.cfg_dropout:
+            text = _CFG_PROMPT
         content = [
             {"type": "image"} for _ in example["source_images"]
-        ] + [{"type": "text", "text": self._truncate_text(example["prompt"])}]
+        ] + [{"type": "text", "text": text}]
         conversation = [
             {"role": "system", "content": [{"type": "text", "text": self.system_prompt}]},
             {"role": "user", "content": content},
@@ -97,12 +108,14 @@ class InternVL3Collator:
             "the image to generate."
         ),
         max_input_text_tokens: int = 256,
+        cfg_dropout: float = 0.0,
     ):
         self.tokenizer = tokenizer
         self.image_size = image_size
         self.system_prompt = system_prompt
         self.query_suffix = query_suffix
         self.max_input_text_tokens = max_input_text_tokens
+        self.cfg_dropout = cfg_dropout
 
     def _truncate_text(self, text: str) -> str:
         token_ids = self.tokenizer(
@@ -112,6 +125,8 @@ class InternVL3Collator:
 
     def _prompt(self, example: dict[str, Any]) -> str:
         user = self._truncate_text(example["prompt"])
+        if self.cfg_dropout > 0 and random.random() < self.cfg_dropout:
+            user = _CFG_PROMPT
         return (
             "<|im_start|>system\n"
             f"{self.system_prompt}"

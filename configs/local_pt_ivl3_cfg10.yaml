@@ -1,0 +1,47 @@
+# InternVL3-1B backbone, 10% of CC12M (60K samples), pure text2image — OpenUni-aligned
+# convergence check. Single card, effective batch 8×4=32.
+#
+# Aligned with the OpenUni reference:
+#   - OpenUni connector (CLIP-style 6L + GELU + xavier/lecun init) + separate projector
+#   - lr 1e-4, AdamW betas (0.9, 0.95), weight_decay 0.05, grad clip max_norm 1.0
+#   - CFG dropout unconditional=0.1
+#   - generation probe of the fixed prompt every 2000 steps -> outputs/*/eval/
+extends: local_pt_ivl3.yaml
+
+model:
+  connector:
+    type: openuni
+    num_queries: 256
+    hidden_size: 896
+    intermediate_size: 3072
+    num_hidden_layers: 6
+    num_attention_heads: 14
+    dropout: 0.0
+
+data:
+  cfg_dropout: 0.1
+  sources:
+    - kind: cc12m_wds
+      path: /data/mingjun/cc12m_local/*.tar
+      split: train
+      # 10% of the full 600K CC12M quota (60K samples); 12 local tars ~= 60.5K rows.
+      sample_count: 60000
+      seed_offset: 0
+
+training:
+  output_dir: outputs/pt_ivl3_cfg10
+  run_name: uniquery-pt-ivl3-cfg10
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-4
+  weight_decay: 0.05
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+  warmup_ratio: 0.05
+  save_steps: 500
+  save_total_limit: 2
+  eval_steps: 2000
+  eval_at_start: true
+  eval_prompt:
+    - a photo of a baseball glove below an umbrella

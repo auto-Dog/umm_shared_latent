@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 from pathlib import Path
 
 import torch
-from transformers import TrainingArguments, set_seed
+from transformers import TrainerCallback, TrainingArguments, set_seed
 
 from umm_uniquery.config import load_config
 from umm_uniquery.hf_mirror import install_hf_mirror_rewrite
@@ -58,6 +59,10 @@ def _training_arguments(config: dict, total_samples: int) -> TrainingArguments:
         gradient_accumulation_steps=int(train.get("gradient_accumulation_steps", 1)),
         learning_rate=float(train.get("learning_rate", 1e-4)),
         weight_decay=float(train.get("weight_decay", 0.1)),
+        # OpenUni trains flow-matching with AdamW betas (0.9, 0.95); the HF Trainer
+        # defaults to (0.9, 0.999). Surface both so configs can match the reference.
+        adam_beta1=float(train.get("adam_beta1", 0.9)),
+        adam_beta2=float(train.get("adam_beta2", 0.999)),
         warmup_ratio=float(train.get("warmup_ratio", 0.03)),
         lr_scheduler_type=train.get("lr_scheduler_type", "cosine"),
         max_grad_norm=float(train.get("max_grad_norm", 1.0)),
@@ -116,6 +121,74 @@ def _print_data_sample(model: Any, components: StageComponents) -> None:
         )
     print("[data-sample] input_ids: shape=" + str(tuple(batch["input_ids"].shape)))
     print("=" * 72)
+
+
+class GenerationEvalCallback(TrainerCallback):
+    """Probe text-to-image capability every `eval_steps` optimizer steps (RANK 0).
+
+    Generates the fixed probe prompt (default "a photo of a baseball glove below an
+    umbrella") through the real inference pipeline and saves the PNG to
+    ``output_dir/eval/step_<n>.png``, plus an ``eval_log.jsonl`` line. The raw model
+    passed in is the same object the Trainer wraps, so toggling train/eval around the
+    probe is safe on a single card; on multi-rank runs only RANK 0 generates.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        output_dir: str | Path,
+        prompts: tuple[str, ...] = ("a photo of a baseball glove below an umbrella",),
+        eval_steps: int = 2000,
+        eval_at_start: bool = True,
+        num_inference_steps: int = 20,
+        guidance_scale: float = 4.5,
+    ):
+        self.model = model
+        self.output_dir = Path(output_dir)
+        self.prompts = prompts
+        self.eval_steps = eval_steps
+        self.eval_at_start = eval_at_start
+        self.num_inference_steps = num_inference_steps
+        self.guidance_scale = guidance_scale
+
+    def _generate(self, step: int | None) -> None:
+        if int(os.environ.get("RANK", "0")) != 0:
+            return
+        eval_dir = self.output_dir / "eval"
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        was_training = self.model.training
+        self.model.eval()
+        try:
+            with torch.no_grad():
+                images = self.model.generate_t2i(
+                    list(self.prompts),
+                    num_inference_steps=self.num_inference_steps,
+                    guidance_scale=self.guidance_scale,
+                )
+        finally:
+            self.model.train(was_training)
+        step_label = f"step_{step:06d}" if step is not None else "final"
+        paths = []
+        for index, image in enumerate(images):
+            path = eval_dir / f"{step_label}_{index}.png"
+            image.save(path)
+            paths.append(str(path))
+        record = {"global_step": step, "prompts": list(self.prompts), "images": paths}
+        log_path = eval_dir / "eval_log.jsonl"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(f"[eval] generated at global_step={step}: {paths}", flush=True)
+
+    def on_train_begin(self, args, state, control):
+        if self.eval_at_start and int(state.global_step) == 0:
+            self._generate(0)
+
+    def on_step_end(self, args, state, control):
+        if self.eval_steps and int(state.global_step) % self.eval_steps == 0:
+            self._generate(int(state.global_step))
+
+    def on_train_end(self, args, state, control):
+        self._generate(int(state.global_step))
 
 
 def main() -> None:
@@ -194,6 +267,23 @@ def main() -> None:
                 f"Trainable parameter count {trainable_millions:.2f}M is outside guard "
                 f"[{lower}, {upper}]M; check the freeze policy and connector config."
             )
+
+    if int(os.environ.get("RANK", "0")) == 0:
+        eval_steps = int(config["training"].get("eval_steps", 2000))
+        eval_prompts = config["training"].get(
+            "eval_prompt", ["a photo of a baseball glove below an umbrella"]
+        )
+        callbacks.append(
+            GenerationEvalCallback(
+                model=model,
+                output_dir=training_args.output_dir,
+                prompts=tuple(
+                    str(prompt) for prompt in eval_prompts if prompt
+                ),
+                eval_steps=eval_steps,
+                eval_at_start=bool(config["training"].get("eval_at_start", True)),
+            )
+        )
 
     trainer = UniQueryTrainer(
         model=model,

@@ -33,6 +33,7 @@ def _diffusion_stage(config: dict[str, Any], model: Any) -> StageComponents:
         shuffle_buffer=int(data.get("shuffle_buffer", 10_000)),
     )
     system_prompt = data.get("system_prompt", _DEFAULT_SYSTEM_PROMPT)
+    cfg_dropout = float(data.get("cfg_dropout", 0.0))
     if config["model"].get("backbone") == "internvl3":
         collator = InternVL3Collator(
             tokenizer=model.tokenizer,
@@ -40,6 +41,7 @@ def _diffusion_stage(config: dict[str, Any], model: Any) -> StageComponents:
             system_prompt=system_prompt,
             query_suffix=model.query_suffix,
             max_input_text_tokens=int(data.get("max_input_text_tokens", 256)),
+            cfg_dropout=cfg_dropout,
         )
     else:
         collator = UniQueryCollator(
@@ -48,6 +50,7 @@ def _diffusion_stage(config: dict[str, Any], model: Any) -> StageComponents:
             system_prompt=system_prompt,
             query_suffix=model.query_suffix,
             max_input_text_tokens=int(data.get("max_input_text_tokens", 256)),
+            cfg_dropout=cfg_dropout,
         )
     return StageComponents(dataset=dataset, collator=collator)
 
