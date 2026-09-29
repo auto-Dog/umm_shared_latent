@@ -48,6 +48,39 @@ docs/                    架构和实验口径
 
 为保证 Accelerate 的进程分发与可恢复顺序，baseline 固定 `dataloader_num_workers: 0`。各 rank 会按确定性全局流选取自己的 batch；这会增加远端流读取量，但可以避免 T2I 无图样本与 Edit 有图样本在集中分发时发生变长张量拼接错误。I/O 扩展应优先增加远端 WebDataset shard 和节点缓存，不应直接增加 PyTorch worker。
 
+## 预训练模型
+
+训练与推理依赖的预训练权重（均为冻结骨干），按配置字段、来源仓库与用途列出，便于在新机器上复用下载：
+
+| 配置字段 | 用途 | Hugging Face 仓库 |
+|---|---|---|
+| `mllm_id` | Qwen 版 backbone（Qwen2.5-VL 冻结 LLM + ViT） | `Qwen/Qwen2.5-VL-3B-Instruct` |
+| `ivl3_id` | InternVL3 版 backbone（InternVL3-1B 冻结，`configs/local_pt*.yaml` 使用） | `OpenGVLab/InternVL3-1B` |
+| `sana_id` | Sana 0.6B 生成骨干（diffusers 完整 pipeline） | `Efficient-Large-Model/Sana_600M_512px_diffusers` |
+| `vae_id` | Sana DC-AE VAE（32 latent channels，Flow Matching 重建损失用） | `mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers` |
+
+在新机器上复用下载（建议走 `hf-mirror`）：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+
+huggingface-cli download OpenGVLab/InternVL3-1B \
+  --local-dir /path/to/models/internvl3-1b
+huggingface-cli download Efficient-Large-Model/Sana_600M_512px_diffusers \
+  --local-dir /path/to/models/sana-600m-512px
+huggingface-cli download mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers \
+  --local-dir /path/to/models/sana-vae
+huggingface-cli download Qwen/Qwen2.5-VL-3B-Instruct \
+  --local-dir /path/to/models/qwen25-vl-3b-instruct
+```
+
+要点：
+
+- InternVL3-1B 是 `internvl_chat` 结构（LLM 为 Qwen2.5 系、视觉为 InternViT），仓库自带自定义 modeling 源文件（`conversation.py`、`modeling_intern_vit.py` 等）。本仓库已将其内置到 `src/umm_uniquery/modeling/internvl3/`，配置只需 `ivl3_id` 指向权重与 tokenizer 目录。
+- `sana-600m-512px` 的 `model_index.json` 为完整 SanaPipeline：`transformer=SanaTransformer2DModel`、`text_encoder=Gemma2Model`、`tokenizer=GemmaTokenizerFast`、`vae=AutoencoderDC`；`sana-vae` 即独立的 DC-AE（`AutoencoderDC`，latent_channels 32），代码中缺失时会回退 `AutoencoderKL`。
+- Qwen 版视觉 forward 对 Transformers 接口敏感，`transformers` 固定 `4.49.0`；远端环境不要未经兼容验证升级该版本。
+- `configs/local_pt*.yaml` 直接引用运行机上的本地模型目录（如 `/root/autodl-tmp/models/...`）；换机器时把上面下载到的本地目录填回 `ivl3_id` / `sana_id` / `vae_id` 即可，其余配置无需改动。
+
 ## 远端训练
 
 以下命令仅供 GPU 训练节点使用，本项目未在当前本地机器执行：

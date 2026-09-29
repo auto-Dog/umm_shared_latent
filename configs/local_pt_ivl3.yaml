@@ -15,7 +15,7 @@ model:
   # retains every LLM layer's activations (~8GB at batch 8). Gradient checkpointing
   # recomputes them on backward instead — without it the 24GB cards OOM when shared
   # with other jobs. (The "nothing trainable behind checkpointing" comment was wrong.)
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   train_flow_model: false
   trainable_parameter_guard_m: null
 
