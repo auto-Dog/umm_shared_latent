@@ -31,8 +31,9 @@ data:
 training:
   output_dir: outputs/pt_ivl3_cfg10
   run_name: uniquery-pt-ivl3-cfg10
-  per_device_train_batch_size: 16
-  gradient_accumulation_steps: 2
+  per_device_train_batch_size: 32
+  gradient_accumulation_steps: 1
+  dataloader_num_workers: 1
   learning_rate: 1e-4
   weight_decay: 0.05
   adam_beta1: 0.9
@@ -41,9 +42,9 @@ training:
   warmup_ratio: 0.05
   save_steps: 500
   save_total_limit: 2
-  # T2I probe every 500 optimizer steps (the run is ~1875 steps total); override
-  # at launch with --set training.eval_steps=N.
-  eval_steps: 100
+  # T2I probe every 500 optimizer steps (the run is ~1875 steps total → fires ~3
+  # times plus once at start); override at launch with --set training.eval_steps=N.
+  eval_steps: 500
   eval_at_start: true
   eval_prompt:
     - a photo of a baseball glove below an umbrella
