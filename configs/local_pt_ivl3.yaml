@@ -7,9 +7,9 @@ extends: local_pt.yaml
 
 model:
   backbone: internvl3
-  ivl3_id: /home/mingjun/OpenUni/OpenUni_MME/models/InternVL3-1B
-  sana_id: /data/mingjun/sana
-  vae_id: /data/mingjun/sana/vae
+  ivl3_id: /root/autodl-tmp/models/internvl3-1b
+  sana_id: /root/autodl-tmp/models/sana-600m-512px
+  vae_id: /root/autodl-tmp/models/sana-vae
   attention_backend: flash_attention_2  # falls back to eager if flash_attn is absent
   # The MetaQuery embedding rows ARE trainable inside the frozen LLM, so autograd
   # retains every LLM layer's activations (~8GB at batch 8). Gradient checkpointing

@@ -3,9 +3,10 @@
 extends: baseline_pt.yaml
 
 model:
-  mllm_id: /data/mingjun/qwen25_vl
-  sana_id: /data/mingjun/sana
-  vae_id: /data/mingjun/sana/vae
+  backbone: internvl3
+  ivl3_id: /root/autodl-tmp/models/internvl3-1b
+  sana_id: /root/autodl-tmp/models/sana-600m-512px
+  vae_id: /root/autodl-tmp/models/sana-vae
 
 data:
   shuffle_buffer: 500

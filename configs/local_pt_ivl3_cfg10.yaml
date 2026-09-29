@@ -21,18 +21,18 @@ model:
 data:
   cfg_dropout: 0.1
   sources:
-    - kind: cc12m_wds
-      path: /data/mingjun/cc12m_local/*.tar
+    - kind: cc12m
+      path: pixparse/cc12m-wds
       split: train
-      # 10% of the full 600K CC12M quota (60K samples); 12 local tars ~= 60.5K rows.
+      # 10% of the full 600K CC12M quota (60K samples), streamed from the Hub/mirror.
       sample_count: 60000
       seed_offset: 0
 
 training:
   output_dir: outputs/pt_ivl3_cfg10
   run_name: uniquery-pt-ivl3-cfg10
-  per_device_train_batch_size: 8
-  gradient_accumulation_steps: 4
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 2
   learning_rate: 1e-4
   weight_decay: 0.05
   adam_beta1: 0.9
@@ -41,7 +41,9 @@ training:
   warmup_ratio: 0.05
   save_steps: 500
   save_total_limit: 2
-  eval_steps: 2000
+  # T2I probe every 500 optimizer steps (the run is ~1875 steps total); override
+  # at launch with --set training.eval_steps=N.
+  eval_steps: 100
   eval_at_start: true
   eval_prompt:
     - a photo of a baseball glove below an umbrella

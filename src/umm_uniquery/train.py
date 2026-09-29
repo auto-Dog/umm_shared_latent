@@ -179,15 +179,15 @@ class GenerationEvalCallback(TrainerCallback):
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"[eval] generated at global_step={step}: {paths}", flush=True)
 
-    def on_train_begin(self, args, state, control):
+    def on_train_begin(self, args, state, control, model=None, **kwargs):
         if self.eval_at_start and int(state.global_step) == 0:
             self._generate(0)
 
-    def on_step_end(self, args, state, control):
+    def on_step_end(self, args, state, control, model=None, **kwargs):
         if self.eval_steps and int(state.global_step) % self.eval_steps == 0:
             self._generate(int(state.global_step))
 
-    def on_train_end(self, args, state, control):
+    def on_train_end(self, args, state, control, model=None, **kwargs):
         self._generate(int(state.global_step))
 
 
@@ -269,7 +269,10 @@ def main() -> None:
             )
 
     if int(os.environ.get("RANK", "0")) == 0:
-        eval_steps = int(config["training"].get("eval_steps", 2000))
+        # eval_steps controls how often the T2I probe runs; tune per-run with
+        # `--set training.eval_steps=N` (and eval_at_start / eval_prompt / the
+        # inference hyperparameters below via the same dotted override).
+        eval_steps = int(config["training"].get("eval_steps", 500))
         eval_prompts = config["training"].get(
             "eval_prompt", ["a photo of a baseball glove below an umbrella"]
         )
