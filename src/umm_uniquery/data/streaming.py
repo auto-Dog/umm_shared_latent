@@ -51,6 +51,12 @@ def standardize_cc12m(row: dict[str, Any]) -> dict[str, Any]:
 DATA_SOURCES.register("cc12m_wds")(standardize_cc12m)
 
 
+# BLIP3o-Pretrain-Long-Caption tars carry the same jpg/txt keys as CC12M
+# (verified: sa_%06d.tar entries are `sa_*.jpg` + `sa_*.txt`), so the caption->image
+# standardizer applies unchanged.
+DATA_SOURCES.register("blip3o")(standardize_cc12m)
+
+
 @DATA_SOURCES.register("omniedit")
 def standardize_omniedit(row: dict[str, Any]) -> dict[str, Any]:
     return {

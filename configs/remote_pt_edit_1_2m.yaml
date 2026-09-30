@@ -1,0 +1,40 @@
+# Stage 2 (remote full run): 1.2M OmniEdit instruction->image continued training.
+#
+# Continues from the stage-1 CC12M adapter (init_checkpoint set by
+# scripts/run_remote.sh) and makes Sana trainable for the first time
+# (train_flow_model: true): query + connector + Sana all fine-tune.
+#
+# Sana has no native image-to-image conditioning: the InternVL3 backbone's
+# MetaQuery path is text-only, so an OmniEdit sample is consumed as
+# `edit instruction text -> edited image` (the reference image is not part of the
+# conditioning). Parameters are set accordingly:
+#   - effective batch kept at cfg10's 32, but micro-batch 8 + accum 4 so the
+#     extra trainable-Sana activations fit a 24GB card;
+#   - lr dropped to 5e-5 with a longer 0.1 warmup (repo edit-stage precedent,
+#     local_pt_edit.yaml) instead of the stage-1 1e-4/0.05;
+#   - CFG dropout 0.1 retained so the flow model keeps an unconditional path.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  # Set by scripts/run_remote.sh to the stage-1 output dir.
+  init_checkpoint: null
+
+data:
+  cfg_dropout: 0.1
+  sources:
+    - kind: omniedit
+      path: TIGER-Lab/OmniEdit-Filtered-1.2M
+      split: train
+      # Full 1.2M OmniEdit quota.
+      sample_count: 1200000
+      seed_offset: 1
+
+training:
+  output_dir: outputs/remote_pt_edit_1_2m
+  run_name: uniquery-remote-pt-edit-1_2m
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 5e-5
+  warmup_ratio: 0.1

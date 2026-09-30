@@ -1,0 +1,30 @@
+# Stage 1 (remote full run): 1.2M CC12M caption->image pretraining.
+#
+# Trains only the MetaQuery learnable query rows + OpenUni connector; Sana and the
+# VAE stay frozen (train_flow_model: false). Hyperparameters are inherited from
+# local_pt_ivl3_cfg10.yaml (effective batch 32, lr 1e-4, AdamW (0.9, 0.95),
+# wd 0.05, clip 1.0, warmup 0.05, CFG dropout 0.1, T2I probe every 500 steps).
+#
+# Launched by scripts/run_remote.sh, which overrides model.ivl3_id / sana_id / vae_id
+# with the auto-downloaded ./cache/{modelname} paths and training.output_dir / run_name.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  # Stage 1 = alignment of queries + connector only. Sana is introduced as a
+  # trainable backbone in stage 2 (remote_pt_edit_1_2m.yaml).
+  train_flow_model: false
+  trainable_parameter_guard_m: null
+  init_checkpoint: null
+
+data:
+  sources:
+    - kind: cc12m
+      path: pixparse/cc12m-wds
+      split: train
+      # Full 1.2M CC12M quota for the query+connector pretraining stage.
+      sample_count: 1200000
+      seed_offset: 0
+
+training:
+  output_dir: outputs/remote_pt_cc12m_1_2m
+  run_name: uniquery-remote-pt-cc12m-1_2m

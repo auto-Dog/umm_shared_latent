@@ -1,0 +1,45 @@
+# Stage 3 (remote full run): instruction-tuning on BLIP3o long-caption 600K +
+# MetaQuery-Instruct 2.4M 600K. Fine-tunes query + connector + Sana.
+#
+# Continues from the stage-2 OmniEdit adapter (init_checkpoint set by
+# scripts/run_remote.sh). Same Sana-trainable parameter policy as stage 2
+# (micro-batch 8 + accum 4 = effective 32, lr 5e-5, warmup 0.1, CFG dropout 0.1).
+#
+# Sources:
+#   - BLIP3o/BLIP3o-Pretrain-Long-Caption (webdataset, jpg/txt -> the same
+#     caption->image standardizer as CC12M);
+#   - xcpan/MetaQuery_Instruct_2.4M (arrow, source_images/prompt/target_image ->
+#     the metaquery_instruct standardizer). The 512px-resized variant
+#     xcpan/MetaQuery_Instruct_2.4M_512res is a smaller-drop alternative with the
+#     same schema.
+# As in stage 2, the InternVL3 text-only query path drops source_images; both
+# sources train as prompt -> target image with a frozen MLLM + trainable Sana.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  # Set by scripts/run_remote.sh to the stage-2 output dir.
+  init_checkpoint: null
+
+data:
+  cfg_dropout: 0.1
+  sources:
+    - kind: blip3o
+      path: BLIP3o/BLIP3o-Pretrain-Long-Caption
+      split: train
+      sample_count: 600000
+      seed_offset: 2
+    - kind: metaquery_instruct
+      path: xcpan/MetaQuery_Instruct_2.4M
+      split: train
+      sample_count: 600000
+      seed_offset: 3
+
+training:
+  output_dir: outputs/remote_pt_finetune_blip3o_metaquery
+  run_name: uniquery-remote-pt-finetune-blip3o-metaquery
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 5e-5
+  warmup_ratio: 0.1
