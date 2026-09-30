@@ -9,6 +9,11 @@
 extends: local_pt_ivl3.yaml
 
 model:
+  # Local copies (override the inherited /root/autodl-tmp paths); other hosts can
+  # override these with --set model.{ivl3,sana,vae}_id=... at launch.
+  ivl3_id: /home/mingjun/models/internvl3-1b
+  sana_id: /home/mingjun/models/sana-600m-512px
+  vae_id: /home/mingjun/models/sana-vae
   connector:
     type: openuni
     num_queries: 256
@@ -31,8 +36,10 @@ data:
 training:
   output_dir: outputs/pt_ivl3_cfg10
   run_name: uniquery-pt-ivl3-cfg10
-  per_device_train_batch_size: 32
-  gradient_accumulation_steps: 1
+  # 16 x 2 = effective 32; the split (not a single batch-32) is what fits the
+  # 24GB 3090 under PYTORCH_CUDA_ALLOC_CONF=expandable_segments.
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 2
   dataloader_num_workers: 1
   learning_rate: 1e-4
   weight_decay: 0.05
