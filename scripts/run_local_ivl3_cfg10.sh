@@ -49,4 +49,4 @@ exec "$PYTHON" -m umm_uniquery.resilient_launch \
   --set model.ivl3_id="$MODEL_ROOT/internvl3-1b" \
   --set model.sana_id="$MODEL_ROOT/sana-600m-512px" \
   --set model.vae_id="$MODEL_ROOT/sana-vae" \
-  > "$RUN_DIR/train.log" 2>&1
+  >> "$RUN_DIR/train.log" 2>&1
