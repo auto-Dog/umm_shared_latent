@@ -1,4 +1,4 @@
-# InternVL3-1B backbone, 10% of CC12M (60K samples), pure text2image — OpenUni-aligned
+# InternVL3-1B backbone, full CC12M quota (600K samples), pure text2image — OpenUni-aligned
 # convergence check. Single card, effective batch 8×4=32.
 #
 # Aligned with the OpenUni reference:
@@ -24,8 +24,8 @@ data:
     - kind: cc12m
       path: pixparse/cc12m-wds
       split: train
-      # 10% of the full 600K CC12M quota (60K samples), streamed from the Hub/mirror.
-      sample_count: 60000
+      # Full 600K CC12M quota, streamed from the Hub/mirror.
+      sample_count: 600000
       seed_offset: 0
 
 training:
