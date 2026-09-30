@@ -7,7 +7,7 @@ model:
   vae_id: mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
   torch_dtype: bfloat16
   attention_backend: sdpa
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   generation_system_prompt: You are a unified model. Generate the image described by the user input. The image query tokens in the sequence represent the image to generate.
   min_pixels: 200704
   max_pixels: 1000000

@@ -30,7 +30,7 @@ data:
       path: pixparse/cc12m-wds
       split: train
       # Full 600K CC12M quota, streamed from the Hub/mirror.
-      sample_count: 600000
+      sample_count: 1200000
       seed_offset: 0
 
 training:
@@ -38,8 +38,8 @@ training:
   run_name: uniquery-pt-ivl3-cfg10
   # 16 x 2 = effective 32; the split (not a single batch-32) is what fits the
   # 24GB 3090 under PYTORCH_CUDA_ALLOC_CONF=expandable_segments.
-  per_device_train_batch_size: 16
-  gradient_accumulation_steps: 2
+  per_device_train_batch_size: 12
+  gradient_accumulation_steps: 3
   dataloader_num_workers: 1
   learning_rate: 1e-4
   weight_decay: 0.05
@@ -52,6 +52,6 @@ training:
   # T2I probe every 500 optimizer steps (the run is ~1875 steps total → fires ~3
   # times plus once at start); override at launch with --set training.eval_steps=N.
   eval_steps: 500
-  eval_at_start: true
+  eval_at_start: false
   eval_prompt:
     - a photo of a baseball glove below an umbrella
