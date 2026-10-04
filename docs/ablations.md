@@ -6,11 +6,11 @@
 
 | ID | Query | Connector | Loss | 配置 |
 |---|---:|---|---|---|
-| B0 | 256 | 6-layer Light Transformer | Flow | `baseline_pt.yaml` → `baseline_dm.yaml` |
-| A1 | 256 | Linear | Flow | `ablations/pt_linear_connector.yaml` → `dm_linear_connector.yaml` |
-| A2 | 64 | 6-layer Light Transformer | Flow | `ablations/pt_query64.yaml` → `dm_query64.yaml` |
-| L1 | 256 | 6-layer Light Transformer | Flow + latent alignment | `ablations/pt_alignment_loss.yaml` → `dm_alignment_loss.yaml` |
-| L2 | 256 | 6-layer Light Transformer | Flow + query diversity | `ablations/pt_diversity_loss.yaml` → `dm_diversity_loss.yaml` |
+| B0 | 256 | 6-layer Light Transformer | Flow | `baseline_pt.yaml` → `legacy/baseline_dm.yaml` |
+| A1 | 256 | Linear | Flow | `legacy/ablations/pt_linear_connector.yaml` → `legacy/ablations/dm_linear_connector.yaml` |
+| A2 | 64 | 6-layer Light Transformer | Flow | `legacy/ablations/pt_query64.yaml` → `legacy/ablations/dm_query64.yaml` |
+| L1 | 256 | 6-layer Light Transformer | Flow + latent alignment | `legacy/ablations/pt_alignment_loss.yaml` → `legacy/ablations/dm_alignment_loss.yaml` |
+| L2 | 256 | 6-layer Light Transformer | Flow + query diversity | `legacy/ablations/pt_diversity_loss.yaml` → `legacy/ablations/dm_diversity_loss.yaml` |
 
 第一轮只判断架构/损失是否有稳定增益。若 L1/L2 无显著改善，不进入大数据或 RL 阶段。
 

@@ -10,8 +10,8 @@
 # conditioning). Parameters are set accordingly:
 #   - effective batch kept at cfg10's 32, but micro-batch 8 + accum 4 so the
 #     extra trainable-Sana activations fit a 24GB card;
-#   - lr dropped to 5e-5 with a longer 0.1 warmup (repo edit-stage precedent,
-#     local_pt_edit.yaml) instead of the stage-1 1e-4/0.05;
+#   - lr dropped to 5e-5 with a longer 0.1 warmup (repo edit-stage precedent)
+#     instead of the stage-1 1e-4/0.05;
 #   - CFG dropout 0.1 retained so the flow model keeps an unconditional path.
 extends: local_pt_ivl3_cfg10.yaml
 

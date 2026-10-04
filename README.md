@@ -98,7 +98,7 @@ DM 阶段从 PT adapter 初始化：
 
 ```bash
 python -m umm_uniquery.resilient_launch --nproc-per-node=8 \
-  --config configs/baseline_dm.yaml \
+  --config configs/legacy/baseline_dm.yaml \
   --set model.init_checkpoint=/mnt/checkpoints/uniquery_pt \
   --set training.output_dir=/mnt/checkpoints/uniquery_dm
 ```
@@ -133,7 +133,7 @@ python -m umm_uniquery.resilient_launch --nproc-per-node=8 \
 
 ```bash
 python -m umm_uniquery.sample \
-  --config configs/baseline_dm.yaml \
+  --config configs/legacy/baseline_dm.yaml \
   --checkpoint /mnt/checkpoints/uniquery_dm \
   --prompts /mnt/eval/geneval_prompts.jsonl \
   --output-dir /mnt/eval/uniquery_geneval

@@ -1,4 +1,4 @@
-extends: ../baseline_pt.yaml
+extends: ../../baseline_pt.yaml
 
 model:
   connector:
