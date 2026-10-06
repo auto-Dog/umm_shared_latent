@@ -1,0 +1,41 @@
+# Stage 3a (sequential finetune, step 1 of 2): caption tuning on BLIP3o
+# long-caption 600K. Fine-tunes query + connector + Sana.
+#
+# Split out of the former combined local_finetune_blip3o_metaquery.yaml so the two
+# instruction-tuning corpora train *in sequence* instead of as a random mixture:
+# this BLIP3o stage runs first, then scripts/run_autodl.sh launches
+# local_finetune_metaquery.yaml initialized from this stage's final adapter.
+# Same Sana-trainable policy as the original combined stage (micro-batch 8 +
+# accum 4 = effective 32, lr 5e-5, warmup 0.1, CFG dropout 0.1).
+#
+# Source: BLIP3o/BLIP3o-Pretrain-Long-Caption (webdataset, jpg/txt -> the same
+# caption->image standardizer as CC12M). Trains as prompt -> target image with a
+# frozen MLLM + trainable Sana.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  # Initialize from the trained PT adapter (checkpoint + base model): the adapter
+  # weights (connector / query embeddings) from the CC12M PT run are loaded onto
+  # the freshly built base model. This is an *init*, not a resume -- optimizer, LR
+  # schedule and global step start fresh for this finetune stage, so it must point
+  # at a checkpoint dir (adapter_model.safetensors), not the run dir.
+  init_checkpoint: /root/umm_shared_latent/outputs/pt_ivl3_cfg10/checkpoint-16667
+
+data:
+  cfg_dropout: 0.1
+  sources:
+    - kind: blip3o
+      path: BLIP3o/BLIP3o-Pretrain-Long-Caption
+      split: train
+      sample_count: 600000
+      seed_offset: 2
+
+training:
+  output_dir: outputs/local_finetune_blip3o
+  run_name: uniquery-local-finetune-blip3o
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 5e-5
+  warmup_ratio: 0.1

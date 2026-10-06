@@ -6,14 +6,27 @@
 #   - lr 1e-4, AdamW betas (0.9, 0.95), weight_decay 0.05, grad clip max_norm 1.0
 #   - CFG dropout unconditional=0.1
 #   - generation probe of the fixed prompt every 2000 steps -> outputs/*/eval/
-extends: local_pt_ivl3.yaml
+#
+# (Previously this file extended `local_pt_ivl3.yaml`, the InternVL3-1B backbone
+# node. That indirection was removed: the backbone settings are folded in here and
+# we extend `local_pt.yaml` directly.)
+extends: local_pt.yaml
 
 model:
+  backbone: internvl3
   # Local copies (override the inherited /root/autodl-tmp paths); other hosts can
   # override these with --set model.{ivl3,sana,vae}_id=... at launch.
   ivl3_id: /home/mingjun/models/internvl3-1b
   sana_id: /home/mingjun/models/sana-600m-512px
   vae_id: /home/mingjun/models/sana-vae
+  attention_backend: flash_attention_2  # falls back to eager if flash_attn is absent
+  # The MetaQuery embedding rows ARE trainable inside the frozen LLM, so autograd
+  # retains every LLM layer's activations (~8GB at batch 8). Gradient checkpointing
+  # recomputes them on backward instead — without it the 24GB cards OOM when shared
+  # with other jobs. (The "nothing trainable behind checkpointing" comment was wrong.)
+  gradient_checkpointing: false
+  train_flow_model: false
+  trainable_parameter_guard_m: null
   connector:
     type: openuni
     num_queries: 256
@@ -24,6 +37,8 @@ model:
     dropout: 0.0
 
 data:
+  image_size: 512
+  shuffle_buffer: 500
   cfg_dropout: 0.1
   sources:
     - kind: cc12m
@@ -36,6 +51,7 @@ data:
 training:
   output_dir: outputs/pt_ivl3_cfg10
   run_name: uniquery-pt-ivl3-cfg10
+  logging_steps: 10
   # 16 x 2 = effective 32; the split (not a single batch-32) is what fits the
   # 24GB 3090 under PYTORCH_CUDA_ALLOC_CONF=expandable_segments.
   per_device_train_batch_size: 12
@@ -49,6 +65,7 @@ training:
   warmup_ratio: 0.05
   save_steps: 500
   save_total_limit: 2
+  deepspeed: null
   # T2I probe every 500 optimizer steps (the run is ~1875 steps total → fires ~3
   # times plus once at start); override at launch with --set training.eval_steps=N.
   eval_steps: 500

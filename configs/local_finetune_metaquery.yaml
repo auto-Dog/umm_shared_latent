@@ -1,0 +1,41 @@
+# Stage 3b (sequential finetune, step 2 of 2): instruction tuning on
+# MetaQuery-Instruct 2.4M (600K). Fine-tunes query + connector + Sana.
+#
+# Split out of the former combined local_finetune_blip3o_metaquery.yaml; runs
+# *after* the BLIP3o stage. scripts/run_autodl.sh overrides init_checkpoint to the
+# BLIP3o stage's output dir, so this continues from that adapter (fresh optimizer,
+# LR schedule and global step for this stage).
+# Same Sana-trainable policy (micro-batch 8 + accum 4 = effective 32, lr 5e-5,
+# warmup 0.1, CFG dropout 0.1).
+#
+# Source: xcpan/MetaQuery_Instruct_2.4M (arrow, source_images/prompt/target_image
+# -> the metaquery_instruct standardizer). The 512px-resized variant
+# xcpan/MetaQuery_Instruct_2.4M_512res is a smaller-drop alternative with the same
+# schema. The InternVL3 text-only query path drops source_images, so this trains
+# as prompt -> target image with a frozen MLLM + trainable Sana.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  # Default for standalone runs: the BLIP3o stage's output dir (its final adapter
+  # sits at the run root as adapter_model.safetensors). scripts/run_autodl.sh
+  # overrides this with its timestamped run root.
+  init_checkpoint: outputs/local_finetune_blip3o
+
+data:
+  cfg_dropout: 0.1
+  sources:
+    - kind: metaquery_instruct
+      path: xcpan/MetaQuery_Instruct_2.4M
+      split: train
+      sample_count: 600000
+      seed_offset: 3
+
+training:
+  output_dir: outputs/local_finetune_metaquery
+  run_name: uniquery-local-finetune-metaquery
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 5e-5
+  warmup_ratio: 0.1

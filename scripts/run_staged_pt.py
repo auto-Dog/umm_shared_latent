@@ -5,13 +5,14 @@ The full 600K+600K mix cannot be streamed from the mirror in one long run: the
 mirror drops multi-GB parquet transfers mid-flight and hf_transfer has no read
 timeout, so the run wedges for hours. Instead we download a bounded batch of
 shards per stage (resumable curl), train on them from local disk (zero network),
-delete them, and repeat. One global LR schedule (max_steps=75000) is kept across
-all stages via Trainer checkpoint resume (StopAtStepCallback + ignore_data_skip,
+delete them, and repeat. One global LR schedule (max_steps derived from the base
+config's source quotas and effective batch) is kept across all stages via Trainer
+checkpoint resume (StopAtStepCallback + ignore_data_skip,
 see src/umm_uniquery/train.py).
 
 Usage:
   UNIQUERY_PYTHON=... CUDA_VISIBLE_DEVICES=1,3 python scripts/run_staged_pt.py \
-      --base-config configs/local_pt_ivl3.yaml \
+      --base-config configs/local_pt_ivl3_cfg10.yaml \
       --output-root outputs/pt_ivl3_staged
 """
 
@@ -217,7 +218,7 @@ def latest_checkpoint(output_dir: Path) -> Path | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-config", default="configs/local_pt_ivl3.yaml")
+    parser.add_argument("--base-config", default="configs/local_pt_ivl3_cfg10.yaml")
     parser.add_argument("--output-root", default="outputs/pt_ivl3_staged")
     parser.add_argument("--staging-root", default="/data/mingjun/pt_stage")
     parser.add_argument("--nproc", type=int, default=2)

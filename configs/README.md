@@ -10,8 +10,10 @@ the chain rather than duplicating keys.
 |---|---|
 | `scripts/run_local_ivl3_cfg10.sh` | `local_pt_ivl3_cfg10.yaml` — main local single-card run |
 | `scripts/run_remote.sh` | `remote_pt_cc12m_1_2m.yaml` → `remote_pt_edit_1_2m.yaml` → `remote_pt_finetune_blip3o_metaquery.yaml` (3-stage remote pipeline) |
+| `scripts/run_autodl.sh blip3o` | `local_finetune_blip3o.yaml` — sequential finetune stage A (AutoDL), init = PT adapter |
+| `scripts/run_autodl.sh metaquery` | `local_finetune_metaquery.yaml` — sequential finetune stage B (AutoDL), init = stage A output |
 | `scripts/run_local.sh`, `scripts/sanity.py` | `local_pt_smoke.yaml` — 600-sample runtime smoke |
-| `scripts/run_staged_pt.py --base-config` | `local_pt_ivl3.yaml` default |
+| `scripts/run_staged_pt.py --base-config` | `local_pt_ivl3_cfg10.yaml` default |
 
 ## Shared bases (required by the above)
 
@@ -19,11 +21,12 @@ the chain rather than duplicating keys.
 baseline_pt.yaml
 └─ local_pt.yaml                     # local-weight runtime profile
    ├─ local_pt_smoke.yaml
-   └─ local_pt_ivl3.yaml             # InternVL3-1B backbone
-      └─ local_pt_ivl3_cfg10.yaml    # OpenUni-aligned run profile
-         ├─ remote_pt_cc12m_1_2m.yaml
-         ├─ remote_pt_edit_1_2m.yaml
-         └─ remote_pt_finetune_blip3o_metaquery.yaml
+   └─ local_pt_ivl3_cfg10.yaml       # InternVL3-1B backbone, OpenUni-aligned run profile
+      ├─ remote_pt_cc12m_1_2m.yaml
+      ├─ remote_pt_edit_1_2m.yaml
+      ├─ remote_pt_finetune_blip3o_metaquery.yaml
+      ├─ local_finetune_blip3o.yaml        # sequential finetune stage A
+      └─ local_finetune_metaquery.yaml     # sequential finetune stage B (init = A)
 ```
 
 `deepspeed_zero1.json` is referenced by `baseline_pt.yaml`.
