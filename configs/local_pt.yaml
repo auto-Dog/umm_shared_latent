@@ -4,9 +4,17 @@ extends: baseline_pt.yaml
 
 model:
   backbone: internvl3
+  # Local copies of the weights; the authoritative sources live in
+  # model_dependency below (inherited sana_id/vae_id from baseline_pt.yaml plus
+  # ivl3_id added here).
   ivl3_id: /root/autodl-tmp/models/internvl3-1b
   sana_id: /root/autodl-tmp/models/sana-600m-512px
   vae_id: /root/autodl-tmp/models/sana-vae
+
+model_dependency:
+  ivl3_id:
+    name: InternVL3-1B (internvl3 版冻结 MLLM backbone)
+    repo: https://huggingface.co/OpenGVLab/InternVL3-1B
 
 data:
   shuffle_buffer: 500

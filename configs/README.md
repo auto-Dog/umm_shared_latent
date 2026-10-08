@@ -4,6 +4,10 @@ Configs compose by inheritance: each file's `extends:` is resolved **relative to
 its own directory**, and child values deep-merge over the parent. Click through
 the chain rather than duplicating keys.
 
+`model_dependency`（顶层，外部基座模型出处）同样随 `extends` 递归合并：
+`baseline_pt.yaml` 记录 Qwen2.5-VL / Sana / VAE 三个官方源，`local_pt.yaml`
+追加 InternVL3-1B；子配置只需补自己新增的字段，不要整体覆写该段。
+
 ## Live entry points
 
 | Entry point | Config |

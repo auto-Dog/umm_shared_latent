@@ -101,6 +101,34 @@ def validate_config(config: dict[str, Any]) -> None:
             raise ValueError(
                 "model.min_pixels must be positive and no greater than model.max_pixels"
             )
+    # model_dependency: provenance for external base models. Every model.*_id this
+    # config actually references must have a matching entry (name + official repo),
+    # so a new machine can recover the authoritative source when local paths change.
+    # The section is required for any config that references a base model field.
+    deps = config.get("model_dependency")
+    if deps is not None:
+        if not isinstance(deps, dict):
+            raise ValueError("model_dependency must be a mapping of model field -> {name, repo}")
+        for field, info in deps.items():
+            if (
+                not isinstance(info, dict)
+                or not info.get("name")
+                or not info.get("repo")
+            ):
+                raise ValueError(
+                    f"model_dependency.{field} must be a mapping with non-empty 'name' and 'repo'"
+                )
+    missing = [
+        field
+        for field in ("mllm_id", "ivl3_id", "sana_id", "vae_id")
+        if field in model_cfg and field not in (deps or {})
+    ]
+    if missing:
+        raise ValueError(
+            "model references base model fields without model_dependency entries: "
+            + ", ".join(f"model.{field}" for field in missing)
+            + " (record the official name + repo of each external base model)"
+        )
     connector = model_cfg.get("connector", {})
     if connector.get("type") == "light_transformer":
         hidden = int(connector["hidden_size"])

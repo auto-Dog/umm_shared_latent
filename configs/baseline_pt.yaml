@@ -26,6 +26,23 @@ model:
   trainable_parameter_guard_m: [70, 140]
   init_checkpoint: null
 
+# Provenance for the external base models this config depends on. The model.*_id
+# fields above may point at Hub ids or at machine-local copies (see
+# local_pt.yaml); this section records the authoritative model name and official
+# source for each field, so a fresh machine can re-fetch from here when local
+# paths change. validate_config enforces that every referenced model.*_id has a
+# matching entry. Entries merge across extends (child keys add, not replace).
+model_dependency:
+  mllm_id:
+    name: Qwen2.5-VL-3B-Instruct (Qwen 版冻结 MLLM backbone)
+    repo: https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct
+  sana_id:
+    name: Sana 0.6B (Sana_600M_512px_diffusers)
+    repo: https://huggingface.co/Efficient-Large-Model/Sana_600M_512px_diffusers
+  vae_id:
+    name: DC-AE f32c32 (Sana 1.1 VAE, 32 latent channels)
+    repo: https://huggingface.co/mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers
+
 data:
   streaming: true
   image_size: 512

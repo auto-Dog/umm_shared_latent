@@ -87,6 +87,8 @@ world_size`，并在偏移大于 0 时自动把 `training.ignore_data_skip` 置�
 | `sana_id` | Sana 0.6B 生成骨干（diffusers 完整 pipeline） | `Efficient-Large-Model/Sana_600M_512px_diffusers` |
 | `vae_id` | Sana DC-AE VAE（32 latent channels，Flow Matching 重建损失用） | `mit-han-lab/dc-ae-f32c32-sana-1.1-diffusers` |
 
+这份对应关系同时固化在 config 中：每个入口配置的顶层 `model_dependency` 段按字段记录了模型名称与官方仓库地址（`baseline_pt.yaml` 记 Qwen/Sana/VAE，`local_pt.yaml` 追加 InternVL3-1B，随 `extends` 递归合并）。`validate_config` 会校验配置引用的每个 `model.*_id` 字段都有对应条目。换机器时 `model.*_id` 可填本地下载目录，`model_dependency` 里的官方地址保持不变、以它为准重新下载。
+
 在新机器上复用下载（建议走 `hf-mirror`）：
 
 ```bash
