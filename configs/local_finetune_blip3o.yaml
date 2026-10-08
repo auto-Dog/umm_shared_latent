@@ -31,6 +31,13 @@ data:
       split: train
       sample_count: 600000
       seed_offset: 2
+      # Resume fast-forward granularity: BLIP3o ships 998 uniform ~565MB tars
+      # (`sa_%06d.tar`) holding ~27M images total, i.e. ~27000 rows/tar (no
+      # per-shard `_info.json` is published, so this is the documented average).
+      # With it, resuming drops the already-consumed tars wholesale and only
+      # row-skips inside the one boundary tar, instead of re-reading — and
+      # re-downloading — every consumed image one by one.
+      shard_samples: 27000
 
 training:
   output_dir: outputs/local_finetune_blip3o

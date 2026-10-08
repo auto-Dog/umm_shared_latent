@@ -31,6 +31,10 @@ data:
       split: train
       sample_count: 600000
       seed_offset: 3
+      # Resume fast-forward granularity: the repo publishes 7286 shards
+      # (`data-XXXXX-of-07286.arrow`) over 2.4M rows, i.e. ~330 rows/shard — fine
+      # enough that a resumed run only row-skips inside one boundary shard.
+      shard_samples: 330
 
 training:
   output_dir: outputs/local_finetune_metaquery

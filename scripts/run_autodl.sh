@@ -51,6 +51,17 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 #
 # Run blip3o first, then metaquery (it consumes blip3o's adapter). Fixed output
 # dirs mean re-running a stage auto-resumes it from its own checkpoints.
+#
+# Continue an interrupted stage from its checkpoint:
+#   bash scripts/run_autodl.sh blip3o --resume                 # newest complete ckpt
+#   bash scripts/run_autodl.sh blip3o --resume=<checkpoint dir>
+#   RESUME=1               bash scripts/run_autodl.sh blip3o
+#   RESUME_FROM=<ckpt dir> bash scripts/run_autodl.sh blip3o
+# `--resume` picks the highest `checkpoint-<step>` under RUN_DIR that looks
+# complete and passes it to the trainer explicitly (failing fast when none
+# exists); a plain re-run instead falls back to the config's
+# failure_recovery.auto_resume. On resume the stage's init adapter is skipped,
+# because the checkpoint already carries those weights.
 # ---------------------------------------------------------------------------
 
 STAGE="${STAGE:-}"
@@ -60,6 +71,25 @@ case "${1:-}" in
         shift
         ;;
 esac
+
+# Resume request handling (see the header for usage):
+#   --resume            -> newest complete checkpoint under RUN_DIR
+#   --resume=<dir>      -> that exact checkpoint
+#   RESUME=1 / RESUME_FROM=<dir> env vars behave the same
+# These flags are consumed here and handed to the trainer as
+# `--resume-from-checkpoint`, never forwarded as `--set` overrides.
+RESUME_REQUEST="${RESUME_FROM:-}"
+if [ -n "${RESUME:-}" ]; then
+    RESUME_REQUEST="${RESUME_FROM:-auto}"
+fi
+forward_args=()
+for arg in "$@"; do
+    case "$arg" in
+        --resume) RESUME_REQUEST="${RESUME_REQUEST:-auto}" ;;
+        --resume=*) RESUME_REQUEST="${arg#--resume=}" ;;
+        *) forward_args+=("$arg") ;;
+    esac
+done
 
 case "$STAGE" in
     blip3o)
@@ -73,9 +103,10 @@ case "$STAGE" in
         INIT_CHECKPOINT="${INIT_CHECKPOINT:-outputs/local_finetune_blip3o}"
         ;;
     *)
-        echo "usage: bash scripts/run_autodl.sh <blip3o|metaquery> [extra --set ...]" >&2
+        echo "usage: bash scripts/run_autodl.sh <blip3o|metaquery> [--resume[=DIR]] [extra --set ...]" >&2
         echo "  blip3o    stage A: configs/local_finetune_blip3o.yaml (init: PT adapter)" >&2
         echo "  metaquery stage B: configs/local_finetune_metaquery.yaml (init: stage A output)" >&2
+        echo "  --resume  continue from the newest complete checkpoint in RUN_DIR" >&2
         exit 2
         ;;
 esac
@@ -87,6 +118,37 @@ cd "$ROOT"
 }
 mkdir -p "$RUN_DIR"
 
+# Resolve the checkpoint to continue from, then hand it to the trainer explicitly.
+# On resume the stage's INIT_CHECKPOINT adapter is dropped: the checkpoint already
+# carries those weights plus the optimizer/scheduler/global-step state, so the run
+# continues instead of re-initialising.
+resume_args=()
+RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
+init_checkpoint="${INIT_CHECKPOINT:-}"
+if [ -n "$RESUME_REQUEST" ]; then
+    if [ "$RESUME_REQUEST" = "auto" ]; then
+        for candidate in $(ls -d "$RUN_DIR"/checkpoint-* 2>/dev/null | sort -Vr); do
+            if [ -f "$candidate/trainer_state.json" ] \
+                && [ -f "$candidate/adapter_model.safetensors" ]; then
+                RESUME_CHECKPOINT="$candidate"
+                break
+            fi
+        done
+        [ -n "$RESUME_CHECKPOINT" ] || {
+            echo "[run_autodl] --resume: no complete checkpoint under $RUN_DIR" >&2
+            exit 1
+        }
+    else
+        RESUME_CHECKPOINT="$RESUME_REQUEST"
+    fi
+    [ -d "$RESUME_CHECKPOINT" ] || {
+        echo "[run_autodl] --resume: checkpoint not found: $RESUME_CHECKPOINT" >&2
+        exit 1
+    }
+    resume_args=(--resume-from-checkpoint "$RESUME_CHECKPOINT")
+    init_checkpoint=""
+fi
+
 overrides=(
     --set "training.output_dir=$RUN_DIR"
     --set "training.run_name=$(basename "$RUN_DIR")"
@@ -94,11 +156,16 @@ overrides=(
     --set "model.sana_id=$MODEL_ROOT/sana-600m-512px"
     --set "model.vae_id=$MODEL_ROOT/sana-vae"
 )
-if [ -n "${INIT_CHECKPOINT:-}" ]; then
-    overrides+=(--set "model.init_checkpoint=$INIT_CHECKPOINT")
+if [ -n "$init_checkpoint" ]; then
+    overrides+=(--set "model.init_checkpoint=$init_checkpoint")
 fi
 
-echo "[run_autodl] stage=$STAGE config=$CONFIG out=$RUN_DIR init=${INIT_CHECKPOINT:-<none>}"
+echo "[run_autodl] stage=$STAGE config=$CONFIG out=$RUN_DIR init=${init_checkpoint:-<none>}"
+if [ -n "$RESUME_CHECKPOINT" ]; then
+    echo "[run_autodl] resume from $RESUME_CHECKPOINT (stream fast-forwards to the checkpoint's step)"
+else
+    echo "[run_autodl] fresh start (no --resume; config auto_resume may still pick up a checkpoint)"
+fi
 echo "[run_autodl] log: $RUN_DIR/train.log"
 
 exec "$PYTHON" -m umm_uniquery.resilient_launch \
@@ -106,4 +173,5 @@ exec "$PYTHON" -m umm_uniquery.resilient_launch \
     --max-restarts="$MAX_RESTARTS" \
     --config "$CONFIG" \
     "${overrides[@]}" \
-    "$@" > "$RUN_DIR/train.log" 2>&1
+    "${resume_args[@]}" \
+    "${forward_args[@]}" > "$RUN_DIR/train.log" 2>&1

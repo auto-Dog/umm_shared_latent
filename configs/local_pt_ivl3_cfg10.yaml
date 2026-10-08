@@ -47,6 +47,11 @@ data:
       # Full 600K CC12M quota, streamed from the Hub/mirror.
       sample_count: 1200000
       seed_offset: 0
+      # Resume fast-forward granularity: cc12m-wds publishes per-shard lengths in
+      # `_info.json` (5040-5041 rows over 2176 tars); 5040 is the conservative
+      # minimum, so a resumed run drops consumed tars wholesale instead of
+      # re-reading every consumed image.
+      shard_samples: 5040
 
 training:
   output_dir: outputs/pt_ivl3_cfg10

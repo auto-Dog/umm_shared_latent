@@ -70,6 +70,17 @@ def validate_config(config: dict[str, Any]) -> None:
     for source in sources:
         if int(source.get("sample_count", 0)) <= 0:
             raise ValueError(f"source.sample_count must be positive: {source}")
+        # Resume fast-forward knobs: shard_start drops a fixed prefix of shards (and so
+        # cannot be combined with an explicit data_files list), shard_samples is the
+        # rows-per-shard hint the automatic offset derivation uses to drop whole shards.
+        if source.get("data_files") and source.get("shard_start") is not None:
+            raise ValueError(
+                f"source {source.get('path')!r} cannot set both data_files and shard_start"
+            )
+        if source.get("shard_start") is not None and int(source["shard_start"]) < 0:
+            raise ValueError(f"source.shard_start must be non-negative: {source}")
+        if source.get("shard_samples") is not None and int(source["shard_samples"]) <= 0:
+            raise ValueError(f"source.shard_samples must be positive: {source}")
     model_cfg = config["model"]
     backbone = model_cfg.get("backbone", "qwen")
     if backbone == "internvl3":
@@ -101,3 +112,6 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("training.failure_recovery.max_restarts must be non-negative")
     if float(recovery.get("monitor_interval_seconds", 1)) <= 0:
         raise ValueError("training.failure_recovery.monitor_interval_seconds must be positive")
+    for key in ("data_start_offset", "stage_start_step"):
+        if config["training"].get(key) is not None and int(config["training"][key]) < 0:
+            raise ValueError(f"training.{key} must be non-negative")

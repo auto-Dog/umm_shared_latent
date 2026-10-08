@@ -16,6 +16,12 @@ def main() -> None:
     parser.add_argument("--nproc-per-node", type=int, default=8)
     parser.add_argument("--max-restarts", type=int, default=None)
     parser.add_argument("--monitor-interval", type=float, default=None)
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        default=None,
+        help="Continue from this checkpoint. Omitted, the trainer falls back to the "
+        "config's failure_recovery.auto_resume / TorchElastic restart handling.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config, args.overrides)
@@ -50,6 +56,8 @@ def main() -> None:
     ]
     for override in args.overrides:
         command.extend(["--set", override])
+    if args.resume_from_checkpoint:
+        command.extend(["--resume-from-checkpoint", args.resume_from_checkpoint])
 
     completed = subprocess.run(command, check=False)
     raise SystemExit(completed.returncode)

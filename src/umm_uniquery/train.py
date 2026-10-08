@@ -91,6 +91,40 @@ def _training_arguments(config: dict, total_samples: int) -> TrainingArguments:
     )
 
 
+def _resolve_data_start_offset(
+    config: dict, training_args: TrainingArguments, resume_checkpoint: str | None
+) -> int:
+    """Global mixture samples already consumed when `resume_checkpoint` was written.
+
+    Each optimizer step consumes ``per_device_batch * grad_accum * world_size`` samples,
+    so the mixture cursor is ``(global_step - stage_start_step) * per_step``. Feeding this
+    to the dataset lets a resumed run fast-forward its streams (dropping whole shards)
+    instead of replaying — and re-downloading — the consumed prefix. ``training.
+    data_start_offset`` overrides the derivation, e.g. when resuming under a different
+    world size or when the checkpoint step does not map linearly onto the data cursor.
+    """
+    explicit = config["training"].get("data_start_offset")
+    if explicit is not None:
+        return max(0, int(explicit))
+    if not resume_checkpoint:
+        return 0
+    try:
+        state = json.loads(
+            (Path(resume_checkpoint) / "trainer_state.json").read_text(encoding="utf-8")
+        )
+        global_step = int(state["global_step"])
+    except (OSError, KeyError, ValueError, TypeError):
+        return 0
+    world_size = max(1, int(os.environ.get("WORLD_SIZE", "1")))
+    per_step = (
+        int(training_args.per_device_train_batch_size)
+        * max(1, int(training_args.gradient_accumulation_steps))
+        * world_size
+    )
+    stage_start_step = int(config["training"].get("stage_start_step", 0))
+    return max(0, (global_step - stage_start_step) * per_step)
+
+
 def _print_data_sample(model: Any, components: StageComponents) -> None:
     """Print one collated sample exactly as the model will receive it (RANK 0).
 
@@ -257,6 +291,20 @@ def main() -> None:
             print(f"[recovery] Resuming from complete checkpoint: {resume_checkpoint}")
         elif elastic_restart_count > 0:
             print("[recovery] No complete checkpoint found; restarting from the beginning")
+
+    # Fast-forward the streaming mixture past the samples the resumed checkpoint already
+    # consumed: the mixture replays its source-selection RNG and drops whole consumed
+    # shards, so resuming is cheap instead of replaying (and re-downloading) the prefix.
+    # When it applies, Trainer's own O(n) data skip must stay off or the prefix would be
+    # skipped twice and leave a hole in the training data.
+    data_start_offset = _resolve_data_start_offset(config, training_args, resume_checkpoint)
+    if components.dataset.set_start_offset(data_start_offset):
+        training_args.ignore_data_skip = True
+        if int(os.environ.get("RANK", "0")) == 0:
+            print(
+                f"[data] Fast-forwarding streaming mixture by {data_start_offset} samples "
+                "(ignore_data_skip=True)."
+            )
 
     trainable_millions = model.trainable_parameter_count / 1_000_000
     guard = config["model"].get("trainable_parameter_guard_m")

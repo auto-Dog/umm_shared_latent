@@ -538,11 +538,14 @@ class UniQueryModel(nn.Module):
         }
         if self.train_flow_model:
             # Fine-tuned flow weights must survive checkpoints; without this a
-            # trainable Sana would silently reset every save/restart.
+            # trainable Sana would silently reset every save/restart. Saved under
+            # the top-level `transformer.` module prefix so they round-trip
+            # through self.load_state_dict() on resume.
             state.update(
                 {
                     name: tensor.detach().cpu().contiguous()
-                    for name, tensor in self.transformer.state_dict().items()
+                    for name, tensor in self.state_dict().items()
+                    if name.startswith("transformer.")
                 }
             )
         state["metaquery_embeddings"] = (
@@ -581,6 +584,16 @@ class UniQueryModel(nn.Module):
                 self.mllm.get_input_embeddings().weight[
                     self.metaquery_token_start : self.metaquery_token_end + 1
                 ].copy_(metaquery_embeddings)
+        # Older finetune checkpoints stored the Sana flow weights as bare
+        # submodule keys (`transformer_blocks.*`). Re-add the top-level
+        # `transformer.` prefix so load_state_dict can map them instead of
+        # reporting every weight as unexpected (which trips the strict check).
+        transformer_keys = set(self.transformer.state_dict().keys())
+        if any(name in transformer_keys for name in state):
+            state = {
+                (f"transformer.{name}" if name in transformer_keys else name): tensor
+                for name, tensor in state.items()
+            }
         missing, unexpected = self.load_state_dict(state, strict=False)
         relevant_missing = [
             key

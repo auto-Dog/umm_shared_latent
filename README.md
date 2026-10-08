@@ -44,9 +44,37 @@ docs/                    架构和实验口径
 - 坏图自动跳过并从同一流补齐；
 - 不执行 `select()`、不下载完整 Arrow 数据；
 - 关闭 Accelerate 的集中 batch 拼接，允许不同 rank 使用不同长度的文本与视觉 patch；
-- checkpoint 恢复依赖 Trainer 的确定性 data skip，因此不要设置 `ignore_data_skip=true`。
+- 续训时数据流会自行快进（见下节），入口会据此自动设置 `ignore_data_skip=true`。
 
 为保证 Accelerate 的进程分发与可恢复顺序，baseline 固定 `dataloader_num_workers: 0`。各 rank 会按确定性全局流选取自己的 batch；这会增加远端流读取量，但可以避免 T2I 无图样本与 Edit 有图样本在集中分发时发生变长张量拼接错误。I/O 扩展应优先增加远端 WebDataset shard 和节点缓存，不应直接增加 PyTorch worker。
+
+### 续训数据快进
+
+续训时不需要从第 0 条数据重放。`ExactStreamingMixture` 的 source 选择只由 seed 和各
+source 的 `sample_count` 决定，与图像内容无关，因此可以在纯 Python 中 replay 这段
+RNG，得到每个 source 已消费的条数，然后：
+
+1. 按 shard 粒度丢弃已经消费完的 shard（不重新下载前缀，WebDataset/parquet 直接
+   跳过大文件）；
+2. 只在尚未消费完的那个边界 shard 上做行级 `.skip()`；
+3. 用 replay 后的 RNG 状态继续按配额混合，保证 source 选择序列与连续训练完全一致。
+
+恢复位置因此是 shard 粒度的“大致”位置：边界 shard 内最多会有 `shard_samples` 量级
+的样本与完全连续训练不同，换来的是近乎零的续训启动成本。
+
+入口 `train.py` 会从 `resume_from_checkpoint/trainer_state.json` 的 `global_step`
+反推已消费条数 `(global_step - stage_start_step) × per_device_batch × grad_accum ×
+world_size`，并在偏移大于 0 时自动把 `training.ignore_data_skip` 置为 `true`——
+数据流已经快进过，若再让 Trainer 逐条 skip 会跳两次，在数据中留下空洞。
+
+可调配置：
+
+| 键 | 位置 | 作用 |
+|---|---|---|
+| `data_start_offset` | `training` | 直接指定已消费条数，覆盖从 checkpoint 反推的结果（例如换了 world size、或 `save_steps` 与 optimizer step 不线性对应时） |
+| `stage_start_step` | `training` | 该 stage 的训练起始 step，用于把 `global_step` 换算为该 stage 已消费的数据量（多阶段接力时必填） |
+| `shard_samples` | 单个 source | 每个 shard 的行数，用于决定能整块丢弃几个 shard；缺失则退化为行级 skip |
+| `shard_start` | 单个 source | 手动从第 N 个 shard 开始读（忽略反推的偏移）；需要自行把该 source 的 `sample_count` 相应下调，否则会因为配额大于剩余数据而报错 |
 
 ## 预训练模型
 
@@ -113,7 +141,7 @@ python -m umm_uniquery.resilient_launch --nproc-per-node=8 \
 2. 最多自动重启 `training.failure_recovery.max_restarts` 次；
 3. 新进程扫描 `output_dir/checkpoint-*`；
 4. 忽略保存中途损坏、缺文件或没有完成标记的 checkpoint；
-5. 从最近完整 checkpoint 恢复 adapter、optimizer、scheduler、global step、RNG，并由 Trainer 跳过已经消费的确定性流式数据。
+5. 从最近完整 checkpoint 恢复 adapter、optimizer、scheduler、global step、RNG，并把确定性流式数据快进到已消费位置（按 shard 丢弃已消费 shard + 边界行级 skip），而不是逐条重放已消费前缀。
 
 默认最多重启 5 次、每 5 秒检查一次。若 OOM 持续复现，超过上限后任务会失败退出，避免无限重启。一次故障最多损失最近 `save_steps` 以内的进度；需要更小恢复窗口时降低 `save_steps`，代价是更多 checkpoint I/O。
 
