@@ -160,6 +160,60 @@ def _print_data_sample(model: Any, components: StageComponents) -> None:
     print("=" * 72)
 
 
+def _print_training_parameters(
+    config: dict,
+    args: argparse.Namespace,
+    model: Any,
+    components: StageComponents,
+    training_args: TrainingArguments,
+) -> None:
+    """Dump the resolved training parameters to the log head (RANK 0).
+
+    Prints the full post-override config plus the derived effective values the
+    trainer actually uses, so every run's log starts with a self-describing
+    parameter block: which config file, which ``--set`` overrides, dataset
+    totals, batch math, LR schedule, and trainable parameter counts.
+    """
+    if int(os.environ.get("RANK", "0")) != 0:
+        return
+    world_size = max(1, int(os.environ.get("WORLD_SIZE", "1")))
+    effective_batch = (
+        int(training_args.per_device_train_batch_size)
+        * max(1, int(training_args.gradient_accumulation_steps))
+        * world_size
+    )
+    total_samples = int(getattr(components.dataset, "total_samples", 0))
+    derived_steps = math.ceil(total_samples / effective_batch) if effective_batch else 0
+    total_millions = getattr(model, "parameter_count", 0) / 1_000_000
+    print("=" * 72)
+    print("[train-params] config file:", Path(args.config).name)
+    print(
+        f"[train-params] overrides ({len(args.overrides)}): "
+        + (" ; ".join(args.overrides) or "(none)")
+    )
+    print("[train-params] ---- derived ----")
+    print(
+        f"[train-params] world_size={world_size} "
+        f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}"
+    )
+    print(
+        f"[train-params] total_samples={total_samples} effective_batch={effective_batch} "
+        f"derived_steps={derived_steps} max_steps={training_args.max_steps}"
+    )
+    print(
+        f"[train-params] lr={training_args.learning_rate} "
+        f"lr_scheduler={training_args.lr_scheduler_type} "
+        f"warmup_steps={training_args.warmup_steps} warmup_ratio={training_args.warmup_ratio}"
+    )
+    print(
+        f"[train-params] trainable={model.trainable_parameter_count / 1_000_000:.2f}M "
+        f"total={total_millions:.2f}M"
+    )
+    print("[train-params] ---- resolved config ----")
+    print(json.dumps(config, indent=2, ensure_ascii=False, default=str))
+    print("=" * 72, flush=True)
+
+
 class GenerationEvalCallback(TrainerCallback):
     """Probe text-to-image capability every `eval_steps` optimizer steps (RANK 0).
 
@@ -252,9 +306,10 @@ def main() -> None:
 
     stage_builder = STAGES.get(config["stage"])
     components = stage_builder(config, model)
-    if int(os.environ.get("RANK", "0")) == 0:
-        _print_data_sample(model, components)
     training_args = _training_arguments(config, components.dataset.total_samples)
+    if int(os.environ.get("RANK", "0")) == 0:
+        _print_training_parameters(config, args, model, components, training_args)
+        _print_data_sample(model, components)
 
     # Staged training: max_steps spans the full run (one LR schedule) while each
     # stage's data is bounded by sample_count. Stop at the stage quota so the
