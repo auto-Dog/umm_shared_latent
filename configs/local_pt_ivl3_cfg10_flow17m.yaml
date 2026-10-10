@@ -1,0 +1,88 @@
+# InternVL3-1B backbone + Sana-0.6B, pretraining with the FLOW MODEL TRAINABLE
+# (train_flow_model: true): adapter (54M) + metaquery rows + Sana flow transformer
+# (~690M trainable total). Data = CC12M 12M + RedCaps5M recap 5M = 17M samples,
+# streamed t2i only. Dual-card: batch 8 × grad-accum 4 = 32/device → 64 global.
+# No max_steps: runs the full 17M pass (~265625 steps) until stopped.
+#
+# Deviations from the frozen-Sana reference (local_pt_ivl3_cfg10.yaml):
+#   - train_flow_model: true (Sana learns in PT), trainable_parameter_guard_m: null
+#   - gradient_checkpointing: true — LLM + Sana activations recompute on backward so
+#     the 24GB cards fit batch 8 with ~690M trainable params
+#   - sources: CC12M 12M + RedCaps5M 5M (new `redcaps5m` kind, wusize/redcaps5m_resized)
+#   - batch 8×4 (was 12×3), warmup_steps 500 (fast initial warmup, no-cap run)
+extends: local_pt.yaml
+
+model:
+  backbone: internvl3
+  # Local copies (override the inherited /root/autodl-tmp paths); other hosts can
+  # override these with --set model.{ivl3,sana,vae}_id=... at launch.
+  ivl3_id: /home/mingjun/models/internvl3-1b
+  sana_id: /home/mingjun/models/sana-600m-512px
+  vae_id: /home/mingjun/models/sana-vae
+  attention_backend: flash_attention_2  # falls back to eager if flash_attn is absent
+  # The MetaQuery embedding rows ARE trainable inside the frozen LLM; checkpointing
+  # recomputes both LLM and Sana activations on backward so batch 8 fits 24GB with
+  # the flow model trainable.
+  gradient_checkpointing: true
+  train_flow_model: true
+  trainable_parameter_guard_m: null
+  connector:
+    type: openuni
+    num_queries: 256
+    hidden_size: 896
+    intermediate_size: 3072
+    num_hidden_layers: 6
+    num_attention_heads: 14
+    dropout: 0.0
+
+data:
+  image_size: 512
+  shuffle_buffer: 500
+  cfg_dropout: 0.1
+  sources:
+    - kind: cc12m
+      path: pixparse/cc12m-wds
+      split: train
+      # Full CC12M 12M quota, streamed from the Hub/mirror.
+      sample_count: 12000000
+      seed_offset: 0
+      # Resume fast-forward granularity: cc12m-wds publishes per-shard lengths in
+      # `_info.json` (5040-5041 rows over 2176 tars); 5040 is the conservative
+      # minimum, so a resumed run drops consumed tars wholesale instead of
+      # re-reading every consumed image.
+      shard_samples: 5040
+    - kind: redcaps5m
+      path: wusize/redcaps5m_resized
+      split: train
+      # RedCaps5M recap WebDataset (raw/00000..00583.tar, ~8562 rows/tar).
+      sample_count: 5000000
+      seed_offset: 1
+      shard_samples: 8562
+
+training:
+  output_dir: outputs/pt_ivl3_cfg10_flow17m
+  run_name: uniquery-pt-ivl3-cfg10-flow17m
+  logging_steps: 10
+  # 8 x 4 = 32 per device; the split (not a single batch-32) is what fits the
+  # 24GB 3090 under PYTORCH_CUDA_ALLOC_CONF=expandable_segments with ~690M trainable.
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  dataloader_num_workers: 1
+  learning_rate: 1e-4
+  weight_decay: 0.05
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+  # Fast initial warmup (~500 optimizer steps); no warmup_ratio (run has no cap).
+  warmup_steps: 500
+  warmup_ratio: 0.0
+  save_steps: 500
+  save_total_limit: 2
+  deepspeed: null
+  # No max_steps: the run trains until the 17M-sample pass is exhausted (~265625
+  # steps) or is stopped. eval_steps 500 fires a T2I probe ~40 min; the probe prompt
+  # below is the reference baseball glove.
+  eval_steps: 500
+  eval_at_start: false
+  eval_prompt:
+    - a photo of a baseball glove below an umbrella

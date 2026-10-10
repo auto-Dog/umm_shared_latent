@@ -64,6 +64,9 @@ def _training_arguments(config: dict, total_samples: int) -> TrainingArguments:
         adam_beta1=float(train.get("adam_beta1", 0.9)),
         adam_beta2=float(train.get("adam_beta2", 0.999)),
         warmup_ratio=float(train.get("warmup_ratio", 0.03)),
+        # Explicit warmup steps (e.g. fast warmup on long no-cap runs) take precedence
+        # over the ratio; set warmup_ratio: 0 in the config to avoid a stale ratio.
+        warmup_steps=int(train.get("warmup_steps", 0)),
         lr_scheduler_type=train.get("lr_scheduler_type", "cosine"),
         max_grad_norm=float(train.get("max_grad_norm", 1.0)),
         bf16=bool(train.get("bf16", True)),

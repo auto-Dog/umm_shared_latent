@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import io
+import json
 import os
 import random
 import re
@@ -79,6 +80,30 @@ def standardize_cc12m(row: dict[str, Any]) -> dict[str, Any]:
 
 # Local WebDataset tar entries carry the same jpg/txt keys as the HF parquet rows.
 DATA_SOURCES.register("cc12m_wds")(standardize_cc12m)
+
+
+@DATA_SOURCES.register("redcaps5m")
+def standardize_redcaps5m(row: dict[str, Any]) -> dict[str, Any]:
+    """RedCaps5M recap WebDataset (wusize/redcaps5m_resized).
+
+    Each tar sample is `<id>.jpg` + `<id>.json`; the annotation carries the recap
+    re-caption in ``caption`` (OpenUni's ``cap_source='re_caption'``) plus the original
+    RedCaps caption in ``original_caption``.
+    """
+    annotation = row.get("json", {})
+    if isinstance(annotation, (bytes, str)):
+        try:
+            annotation = json.loads(annotation)
+        except (ValueError, TypeError):
+            annotation = {}
+    if not isinstance(annotation, dict):
+        annotation = {}
+    return {
+        "task": "t2i",
+        "prompt": _last_text(annotation.get("caption", row.get("caption", ""))),
+        "source_images": [],
+        "target_image": _image(row.get("jpg", row.get("image"))),
+    }
 
 
 # BLIP3o-Pretrain-Long-Caption tars carry the same jpg/txt keys as CC12M
