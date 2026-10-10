@@ -1,0 +1,42 @@
+# MAE-initialized connector probe on top of local_pt_ivl3_cfg10.yaml.
+#
+# Hypothesis from "natural image predicting improves abstract reasoning": MAE
+# (masked-image-modeling) pre-training on natural images gives a ViT encoder
+# inductive biases that transfer to downstream tasks. Test: instead of the random
+# OpenUni init, seed the 6-layer query connector from a MAE-pretrained ViT encoder.
+#
+# The connector transformer blocks have the same format as a ViT encoder
+# (pre-norm LayerNorm -> MHSA -> residual -> GELU MLP -> residual), so
+# facebook/vit-mae-base's encoder weights copy in 1:1. That fixes the connector
+# format to the MAE checkpoint: hidden_size 768 / 12 heads / intermediate 3072
+# (vs 896/14 in cfg10), and inserts an input projection 896->768 because
+# InternVL3-1B's frozen hidden states are 896-dim. Only the encoder blocks are
+# seeded; input projection and the Sana projector stay randomly initialized.
+#
+# 5000 optimizer steps, dual 3090 (CUDA_VISIBLE_DEVICES=0,1 NPROC=2):
+# per-device 12 x 2 cards x accum 3 = effective batch 72, ~360K CC12M samples
+# consumed (< the 1.2M quota), eval probe every 500 steps as in cfg10.
+extends: local_pt_ivl3_cfg10.yaml
+
+model:
+  connector:
+    type: openuni_mae
+    num_queries: 256
+    # Must match the chosen MAE checkpoint (vit-mae-base): 768/12/3072, GELU MLP.
+    hidden_size: 768
+    intermediate_size: 3072
+    num_hidden_layers: 6
+    num_attention_heads: 12
+    dropout: 0.0
+    layer_norm_eps: 1.0e-12  # MAE's LayerNorm epsilon
+    mae_id: /home/mingjun/models/vit-mae-base
+    # Seed the 6 connector layers from the first half of the 12-layer MAE encoder;
+    # extend to [0..11] to carry the whole stack.
+    mae_layers: [0, 1, 2, 3, 4, 5]
+
+training:
+  output_dir: outputs/pt_ivl3_cfg10_mae
+  run_name: uniquery-pt-ivl3-cfg10-mae
+  # 5000-step probe (the inherited 1.2M-sample quota would derive ~16667 steps at
+  # batch 72; this caps the run far below it).
+  max_steps: 5000

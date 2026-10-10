@@ -389,6 +389,110 @@ class OpenUniQueryConnector(nn.Module):
         return self.projector(hidden), hidden
 
 
+_MAE_LAYER_PREFIX = "vit.encoder.layer.{index}."
+# MAE ViT encoder block tensor names (transformers 4.49 layout, q/k/v split) mapped
+# to the OpenUni encoder layer attributes. The two blocks share the exact format:
+# pre-norm LayerNorm -> MHSA -> residual, then LayerNorm -> GELU MLP -> residual.
+_MAE_TO_CONNECTOR = [
+    ("layer_norm1", "layernorm_before"),
+    ("layer_norm2", "layernorm_after"),
+    ("self_attn.q_proj", "attention.attention.query"),
+    ("self_attn.k_proj", "attention.attention.key"),
+    ("self_attn.v_proj", "attention.attention.value"),
+    ("self_attn.out_proj", "attention.output.dense"),
+    ("mlp.fc1", "intermediate.dense"),
+    ("mlp.fc2", "output.dense"),
+]
+
+
+def _mae_weights(mae_id: str) -> dict[str, torch.Tensor]:
+    """Load a MAE ViT checkpoint's state dict from a local dir or the Hub.
+
+    Prefers the local ``model.safetensors`` / ``pytorch_model.bin`` (the offline
+    path used on the mirror-only hosts), and falls back to ``ViTMAEModel`` so
+    ``mae_id`` can also be a Hub repo id (downloaded through HF_ENDPOINT).
+    """
+    from pathlib import Path
+
+    from safetensors.torch import load_file
+
+    directory = Path(mae_id)
+    safetensors_path = directory / "model.safetensors"
+    if safetensors_path.is_file():
+        return load_file(str(safetensors_path))
+    bin_path = directory / "pytorch_model.bin"
+    if bin_path.is_file():
+        state = torch.load(str(bin_path), map_location="cpu")
+        if isinstance(state, dict) and "model" in state:
+            state = state["model"]
+        if not isinstance(state, dict):
+            raise ValueError(f"Unexpected pytorch_model.bin contents from {mae_id}")
+        return state
+    # Remote fallback: mirrors OpenUni's offline-first convention but still lets
+    # hosts without a local copy pull the checkpoint through the HF mirror.
+    from transformers import ViTMAEModel
+
+    return ViTMAEModel.from_pretrained(mae_id, torch_dtype=torch.float32).state_dict()
+
+
+def load_mae_encoder_weights(
+    encoder: OpenUniConnectorEncoder, mae_id: str, layers: list[int]
+) -> None:
+    """Seed the connector encoder from MAE-pretrained ViT encoder blocks.
+
+    ``layers`` maps connector layer i to MAE encoder layer ``layers[i]``, so a
+    6-layer connector can take the first half of the 12-layer vit-mae-base encoder
+    (``[0..5]``) or the whole stack (``[0..11]``). Everything else — the input
+    projection, the Sana projector, the final RMS norm — keeps its OpenUni init.
+    """
+    weights = _mae_weights(mae_id)
+    with torch.no_grad():
+        for connector_index, mae_index in enumerate(layers):
+            prefix = _MAE_LAYER_PREFIX.format(index=mae_index)
+            layer = encoder.layers[connector_index]
+            for target, source in _MAE_TO_CONNECTOR:
+                destination = layer
+                for part in target.split("."):
+                    destination = getattr(destination, part)
+                weight = weights.get(prefix + source + ".weight")
+                if weight is None:
+                    raise KeyError(
+                        f"MAE checkpoint {mae_id!r} is missing {prefix + source}.weight; "
+                        "is it a ViT-MAE model?"
+                    )
+                destination.weight.copy_(weight)
+                bias = weights.get(prefix + source + ".bias")
+                if bias is not None:
+                    destination.bias.copy_(bias)
+
+
+class OpenUniMAEQueryConnector(OpenUniQueryConnector):
+    """OpenUni connector seeded from a MAE-pretrained ViT encoder.
+
+    Natural-image-predicting (MAE) pre-training improves downstream tasks, so this
+    variant boots the query transformer from MAE encoder weights instead of the
+    random OpenUni init: the connector blocks share the ViT encoder's exact
+    pre-norm LayerNorm -> MHSA -> GELU MLP format, which lets the weights be copied
+    directly. hidden_size/num_attention_heads must match the chosen MAE checkpoint
+    (768/12 for vit-mae-base); when the backbone hidden size differs,
+    OpenUniQueryConnector inserts an input projection automatically.
+    """
+
+    def __init__(
+        self,
+        mae_id: str,
+        mae_layers: list[int] | None = None,
+        **kwargs: object,
+    ):
+        super().__init__(**kwargs)
+        layers = (
+            list(mae_layers)
+            if mae_layers is not None
+            else list(range(len(self.encoder.layers)))
+        )
+        load_mae_encoder_weights(self.encoder, mae_id, layers)
+
+
 def build_connector(config: dict, context_size: int, output_size: int) -> nn.Module:
     connector_type = config.get("type", "light_transformer")
     kwargs = {key: value for key, value in config.items() if key != "type"}
@@ -398,4 +502,6 @@ def build_connector(config: dict, context_size: int, output_size: int) -> nn.Mod
         return LinearQueryConnector(context_size=context_size, output_size=output_size, **kwargs)
     if connector_type == "openuni":
         return OpenUniQueryConnector(context_size=context_size, output_size=output_size, **kwargs)
+    if connector_type == "openuni_mae":
+        return OpenUniMAEQueryConnector(context_size=context_size, output_size=output_size, **kwargs)
     raise ValueError(f"Unknown connector type: {connector_type}")
