@@ -16,6 +16,11 @@ probes/
 └── logs/                各脚本 stdout
 ```
 
+> **生成结果位置**：测试产物（`outputs/`、`logs/`、seed42 对比图）已移出本仓库，
+> 统一放在 `/home/mingjun/probes/`。scripts / prompts / 本 README 仍在仓库内
+> `probes/` 目录；重跑 `run_all.sh` 会就地重新生成 `probes/outputs/` 与
+> `probes/logs/`。
+
 ## 当前模型
 
 | 输出目录 | 模型 | 说明 |

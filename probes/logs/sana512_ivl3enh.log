@@ -1,20 +1,0 @@
-loading InternVL3-1B from /home/mingjun/models/internvl3-1b ...
-internvl3 loaded in 135.8s
-loading Sana 512px from /home/mingjun/models/sana-600m-512px (fp16, vae+text_encoder bf16)...
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:01<00:01,  1.83it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:01<00:01,  1.69it/s]
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
-Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  1.62it/s][A
-Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  2.21it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  2.10it/s]
-Loading pipeline components...:  80%|████████  | 4/5 [00:02<00:00,  1.34it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:02<00:00,  1.81it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:02<00:00,  1.70it/s]
-loaded in 141.0s on NVIDIA GeForce RTX 3090
-Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
-[umbrella_baseball] enhanced: 'A photo depicting a baseball glove resting beneath a vibrant umbrella, with the soft light casting a warm glow over the scene, creating a serene and inviting atmosphere.'  (candidates: 1)
-  0%|          | 0/20 [00:00<?, ?it/s]  5%|▌         | 1/20 [00:00<00:03,  5.25it/s] 20%|██        | 4/20 [00:00<00:01, 14.48it/s] 35%|███▌      | 7/20 [00:00<00:00, 18.67it/s] 50%|█████     | 10/20 [00:00<00:00, 20.86it/s] 65%|██████▌   | 13/20 [00:00<00:00, 22.17it/s] 80%|████████  | 16/20 [00:00<00:00, 23.07it/s] 95%|█████████▌| 19/20 [00:00<00:00, 23.68it/s]100%|██████████| 20/20 [00:00<00:00, 20.89it/s]
-[umbrella_baseball] seed=42 1.3s -> outputs/sana512_ivl3enh/umbrella_baseball/42.png
-  0%|          | 0/20 [00:00<?, ?it/s] 15%|█▌        | 3/20 [00:00<00:00, 24.70it/s] 30%|███       | 6/20 [00:00<00:00, 24.71it/s] 45%|████▌     | 9/20 [00:00<00:00, 24.79it/s] 60%|██████    | 12/20 [00:00<00:00, 24.86it/s] 75%|███████▌  | 15/20 [00:00<00:00, 24.87it/s] 90%|█████████ | 18/20 [00:00<00:00, 24.94it/s]100%|██████████| 20/20 [00:00<00:00, 24.90it/s]
-[umbrella_baseball] seed=2026 1.1s -> outputs/sana512_ivl3enh/umbrella_baseball/2026.png
-  0%|          | 0/20 [00:00<?, ?it/s] 15%|█▌        | 3/20 [00:00<00:00, 24.70it/s] 30%|███       | 6/20 [00:00<00:00, 24.78it/s] 45%|████▌     | 9/20 [00:00<00:00, 24.79it/s] 60%|██████    | 12/20 [00:00<00:00, 24.53it/s] 75%|███████▌  | 15/20 [00:00<00:00, 24.70it/s] 90%|█████████ | 18/20 [00:00<00:00, 24.81it/s]100%|██████████| 20/20 [00:00<00:00, 24.77it/s]
-[umbrella_baseball] seed=2027 1.1s -> outputs/sana512_ivl3enh/umbrella_baseball/2027.png
-  0%|          | 0/20 [00:00<?, ?it/s] 15%|█▌        | 3/20 [00:00<00:00, 24.58it/s] 30%|███       | 6/20 [00:00<00:00, 24.66it/s] 45%|████▌     | 9/20 [00:00<00:00, 24.81it/s] 60%|██████    | 12/20 [00:00<00:00, 24.87it/s] 75%|███████▌  | 15/20 [00:00<00:00, 24.83it/s] 90%|█████████ | 18/20 [00:00<00:00, 24.92it/s]100%|██████████| 20/20 [00:00<00:00, 24.87it/s]
-[umbrella_baseball] seed=2028 1.1s -> outputs/sana512_ivl3enh/umbrella_baseball/2028.png
-done -> outputs/sana512_ivl3enh
