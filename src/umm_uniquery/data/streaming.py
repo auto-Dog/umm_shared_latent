@@ -347,7 +347,10 @@ class ExactStreamingMixture(IterableDataset):
         for row in stream:
             try:
                 yield standardize(row)
-            except (OSError, TypeError, ValueError, KeyError):
+            except (OSError, TypeError, ValueError, KeyError, SyntaxError):
+                # SyntaxError: datasets' Image feature decode raises it (not OSError)
+                # on corrupt image bytes whose EXIF/TIFF header fails to parse (seen
+                # on redcaps5m/cc12m shards), before the standardizer can run.
                 continue
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
